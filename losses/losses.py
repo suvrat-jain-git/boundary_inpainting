@@ -266,6 +266,157 @@ class SpectralBoundaryCoherenceLoss(nn.Module):
 
         # No boundary pixels — return zero with gradient connection
         return pred.sum() * 0.0
+    
+class AdaptiveSpectralBoundaryLoss(nn.Module):
+    """
+    Boundary-localized spectral loss with learned per-band frequency weights.
+    
+    Extends SpectralBoundaryCoherenceLoss by decomposing the FFT magnitude
+    spectrum into radial frequency bands and learning per-band importance
+    weights, with entropy regularization to prevent weight collapse.
+    
+    Novel contribution over FFL (Jiang et al. 2021):
+      1. Localized to boundary band only (not global)
+      2. Adaptive per-band weighting (FFL uses fixed weights)
+      3. Entropy regularization prevents degenerate weight solutions
+    """
+    
+    def __init__(
+        self,
+        patch_size: int = 16,
+        n_samples: int = 8,
+        n_bands: int = 4,
+        entropy_weight: float = 0.1,
+    ):
+        super().__init__()
+        self.patch_size = patch_size
+        self.n_samples = n_samples
+        self.n_bands = n_bands
+        self.entropy_weight = entropy_weight
+        
+        # Learned per-band weights — this is the novel part
+        # These are trainable parameters, one per frequency band
+        self.band_logits = nn.Parameter(torch.zeros(n_bands))
+        
+        # Precompute which FFT bins belong to which radial band
+        self._band_masks = self._make_band_masks(patch_size, n_bands)
+    
+    def _make_band_masks(self, ps: int, n_bands: int):
+        """
+        Divide the FFT grid into n_bands concentric rings.
+        
+        The FFT of a ps×ps patch produces a ps×ps grid of frequencies.
+        The center is DC (zero frequency). Distance from center = frequency.
+        We divide [0, max_distance] into n_bands equal rings.
+        """
+        cy, cx = ps // 2, ps // 2
+        ys = torch.arange(ps).float() - cy
+        xs = torch.arange(ps).float() - cx
+        # Distance of each FFT bin from center (= frequency magnitude)
+        dist = torch.sqrt(ys[:, None]**2 + xs[None, :]**2)
+        max_dist = dist.max()
+        
+        masks = []
+        for i in range(n_bands):
+            lo = (i / n_bands) * max_dist
+            hi = ((i + 1) / n_bands) * max_dist
+            mask = ((dist >= lo) & (dist < hi)).float()
+            masks.append(mask)
+        
+        # Stack: (n_bands, ps, ps)
+        return torch.stack(masks)
+    
+    def forward(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        mask: torch.Tensor,
+        boundary_band: torch.Tensor,
+    ) -> torch.Tensor:
+        B, C, H, W = pred.shape
+        ps = self.patch_size
+        
+        # Move band masks to same device as input
+        band_masks = self._band_masks.to(pred.device)  # (n_bands, ps, ps)
+        
+        # Softmax over band logits → normalized weights that sum to 1
+        band_weights = torch.softmax(self.band_logits, dim=0)  # (n_bands,)
+        
+        # Composite image: real pixels where known, predicted where missing
+        comp = target * (1 - mask) + pred * mask
+        
+        band_flat = boundary_band.view(B, -1)
+        patch_losses = []
+        
+        for b in range(B):
+            nz = torch.nonzero(band_flat[b] > 0.5, as_tuple=False)
+            if len(nz) < 4:
+                continue
+            
+            n_draw = min(self.n_samples, len(nz))
+            indices = nz[
+                torch.randperm(len(nz), device=pred.device)[:n_draw], 0
+            ]
+            
+            for idx in indices:
+                y, x = int(idx) // W, int(idx) % W
+                y0 = max(0, y - ps // 2)
+                x0 = max(0, x - ps // 2)
+                y1 = min(H, y0 + ps)
+                x1 = min(W, x0 + ps)
+                
+                if (y1 - y0) < ps // 2 or (x1 - x0) < ps // 2:
+                    continue
+                
+                p_comp = comp[b, :, y0:y1, x0:x1]    # (C, ph, pw)
+                p_tgt  = target[b, :, y0:y1, x0:x1]
+                
+                # FFT magnitude spectrum for this patch
+                mag_comp = torch.abs(torch.fft.fftshift(
+                    torch.fft.fft2(p_comp)
+                ))  # (C, ph, pw)
+                mag_tgt = torch.abs(torch.fft.fftshift(
+                    torch.fft.fft2(p_tgt)
+                ))
+                
+                # Compute per-band loss
+                band_loss = torch.tensor(0.0, device=pred.device)
+                actual_ps_h = y1 - y0
+                actual_ps_w = x1 - x0
+                
+                for band_i in range(self.n_bands):
+                    # Resize band mask to actual patch size if needed
+                    bm = band_masks[band_i]
+                    if bm.shape != (actual_ps_h, actual_ps_w):
+                        bm = F.interpolate(
+                            bm.unsqueeze(0).unsqueeze(0),
+                            size=(actual_ps_h, actual_ps_w),
+                            mode='nearest'
+                        ).squeeze()
+                    
+                    # L1 difference in this frequency band
+                    diff = torch.abs(mag_comp - mag_tgt) * bm
+                    n_bins = bm.sum().clamp(min=1.0)
+                    band_diff = diff.sum() / (n_bins * C)
+                    
+                    # Weight by learned band importance
+                    band_loss = band_loss + band_weights[band_i] * band_diff
+                
+                patch_losses.append(band_loss)
+        
+        if not patch_losses:
+            return pred.sum() * 0.0
+        
+        spectral_loss = torch.stack(patch_losses).mean()
+        
+        # Entropy regularizer — encourages weights to stay spread across bands
+        # Without this, the model might learn to ignore all bands except one
+        # H(w) = -sum(w * log(w)), maximizing entropy = keeping weights spread
+        entropy = -(band_weights * torch.log(band_weights + 1e-8)).sum()
+        
+        # We SUBTRACT entropy term because we want to MAXIMIZE entropy
+        # (maximize spread = minimize negative entropy)
+        return spectral_loss - self.entropy_weight * entropy
 
 
 # ── TV Loss ────────────────────────────────────────────────────────────────────
