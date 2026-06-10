@@ -15,7 +15,7 @@ import torch
 from PIL import Image
 from scipy.ndimage import binary_dilation, binary_erosion
 from torch.utils.data import DataLoader, Dataset, Subset
-from tqdm import tqdm
+
 import torchvision.transforms as T
 
 from configs.config import Config
@@ -101,11 +101,14 @@ def generate_cached_masks(
     rng = np.random.RandomState(seed + 999)
     paths = []
 
-    for i in tqdm(range(num_masks), desc=f"  Caching {prefix} masks"):
+    report_every = max(1, num_masks // 10)
+    for i in range(num_masks):
         mp = cache_dir / f"{prefix}_{i:04d}.npy"
         if not mp.exists():
             np.save(mp, generate_freeform_mask(h, w, rng=rng))
         paths.append(mp)
+        if (i + 1) % report_every == 0 or (i + 1) == num_masks:
+            print(f"    {i+1}/{num_masks} masks cached", flush=True)
 
     return paths
 
@@ -258,16 +261,46 @@ def setup_data(cfg: Config):
         seed=cfg.train.seed,
     )
 
-    celeba_available = Path(data.celeba_dir).exists()
+    # Resolve the actual image directory within the celeba root.
+    # torchvision CelebA:  {root}/celeba/img_align_celeba/
+    # torchvision LFW:     {root}/lfw-py/lfw_funneled/**
+    # our old downloader:  {root}/images/
+    # flat snapshot:       {root}/*.jpg
+    # create_splits() uses rglob so any of these works when we pass the right root.
+    _celeba_base = Path(data.celeba_dir)
+    celeba_available = _celeba_base.exists() and (_celeba_base / ".download_complete").exists()
     if celeba_available:
+        # Find the shallowest subdirectory that actually contains images
+        _celeba_image_root = _celeba_base
+        for _candidate in [
+            _celeba_base / "celeba" / "img_align_celeba",  # torchvision CelebA
+            _celeba_base / "images",                        # our downloader
+            _celeba_base / "lfw-py" / "lfw_funneled",      # torchvision LFW
+        ]:
+            if _candidate.exists() and any(_candidate.rglob("*.jpg")):
+                _celeba_image_root = _candidate
+                break
         celeba_splits = create_splits(
-            Path(data.celeba_dir),
+            _celeba_image_root,
             Path(paths.splits_dir) / "celeba_splits.json",
             seed=cfg.train.seed,
         )
     else:
         celeba_splits = {"train": [], "val": [], "test": []}
-        print("CelebA-HQ not found — cross-domain eval will be skipped.")
+        print("CelebA/face dataset not found — cross-domain face eval will be skipped.")
+
+    # DTD dataset (optional)
+    dtd_dir       = getattr(data, "dtd_dir", "./datasets/dtd")
+    dtd_available = Path(dtd_dir).exists()
+    if dtd_available:
+        dtd_splits = create_splits(
+            Path(dtd_dir),
+            Path(paths.splits_dir) / "dtd_splits.json",
+            seed=cfg.train.seed,
+        )
+    else:
+        dtd_splits = {"train": [], "val": [], "test": []}
+        print("DTD not found — DTD cross-domain eval will be skipped.")
 
     # Cached masks
     mask_dir = Path(paths.cached_masks_dir)
@@ -327,6 +360,16 @@ def setup_data(cfg: Config):
             boundary_dilation=cfg.loss.boundary_dilation,
         )
 
+    # DTD test set
+    dtd_test_ds = None
+    if dtd_available and dtd_splits["test"]:
+        dtd_test_ds = InpaintingDataset(
+            dtd_splits["test"],
+            fixed_mask_paths=test_masks,
+            img_size=data.img_size,
+            boundary_dilation=cfg.loss.boundary_dilation,
+        )
+
     return {
         # Full loaders (for final paper runs)
         "train_loader":      make_loader(train_ds,  bs, True,  nw, pm, True),
@@ -338,12 +381,19 @@ def setup_data(cfg: Config):
         "fast_val_loader":   make_loader(fast_val_ds,   bs, False, nw, pm),
         "fast_test_loader":  make_loader(fast_test_ds,  bs, False, nw, pm),
 
-        # CelebA
+        # CelebA cross-domain
         "celeba_loader": (
             make_loader(celeba_test_ds, bs, False, nw, pm)
             if celeba_test_ds else None
         ),
 
-        "places_splits":   places_splits,
+        # DTD cross-domain
+        "dtd_loader": (
+            make_loader(dtd_test_ds, bs, False, nw, pm)
+            if dtd_test_ds else None
+        ),
+
+        "places_splits":    places_splits,
         "celeba_available": celeba_available,
+        "dtd_available":    dtd_available,
     }

@@ -27,6 +27,9 @@ Addresses reviewer concerns:
 
 import csv
 import json
+import os
+import shutil
+import tempfile
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -37,7 +40,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from skimage.metrics import peak_signal_noise_ratio as calc_psnr
 from skimage.metrics import structural_similarity as calc_ssim
-from tqdm import tqdm
 
 try:
     import lpips
@@ -45,6 +47,13 @@ try:
 except ImportError:
     LPIPS_AVAILABLE = False
     print("LPIPS not available. Install with: pip install lpips")
+
+try:
+    from cleanfid import fid as clean_fid_module
+    FID_AVAILABLE = True
+except ImportError:
+    FID_AVAILABLE = False
+    print("clean-fid not available. Install with: pip install clean-fid")
 
 
 # ── Spectral Coherence Score ───────────────────────────────────────────────────
@@ -159,14 +168,15 @@ class ModelEvaluator:
 
         def _autocast(use_amp):
             if use_amp and torch.cuda.is_available():
-                return torch.amp.autocast(device_type="cuda", dtype=torch.float16)
+                return torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16)
             return torch.amp.autocast(device_type="cpu", dtype=torch.float32, enabled=False)
 
-        for batch_idx, (images, masks, boundaries) in enumerate(
-            tqdm(loader, desc="  Evaluating")
-        ):
+        total_batches = len(loader) if max_batches is None else min(max_batches, len(loader))
+        for batch_idx, (images, masks, boundaries) in enumerate(loader):
             if max_batches is not None and batch_idx >= max_batches:
                 break
+            if batch_idx % 50 == 0:
+                print(f"    Eval batch {batch_idx+1}/{total_batches}", flush=True)
 
             images = images.to(self.device, non_blocking=True)
             masks = masks.to(self.device, non_blocking=True)
@@ -324,7 +334,7 @@ def run_sensitivity_ablation(
 
         model.eval()
         with torch.no_grad():
-            for images, masks, boundaries in tqdm(loader, desc=f"  K={k}", leave=False):
+            for images, masks, boundaries in loader:
                 images = images.to(device)
                 masks = masks.to(device)
                 boundaries = boundaries.to(device)
@@ -356,7 +366,7 @@ def run_sensitivity_ablation(
 
         model.eval()
         with torch.no_grad():
-            for images, masks, boundaries in tqdm(loader, desc=f"  ps={ps}", leave=False):
+            for images, masks, boundaries in loader:
                 images = images.to(device)
                 masks = masks.to(device)
                 boundaries = boundaries.to(device)
@@ -385,7 +395,7 @@ def run_sensitivity_ablation(
 
         model.eval()
         with torch.no_grad():
-            for images, masks, boundaries in tqdm(loader, desc=f"  r={r}", leave=False):
+            for images, masks, boundaries in loader:
                 images = images.to(device)
                 masks = masks.to(device)
                 boundaries = boundaries.to(device)
@@ -552,3 +562,88 @@ def save_results(
             writer.writeheader()
             writer.writerows(flat_rows)
         print(f"Saved: {csv_path}")
+
+
+# ── FID Computation ────────────────────────────────────────────────────────────
+
+def compute_fid_from_loader(
+    model:      nn.Module,
+    loader,
+    device:     torch.device,
+    results_dir: str,
+    run_name:   str,
+    use_bf16:   bool = True,
+    max_batches: Optional[int] = None,
+) -> float:
+    """
+    Compute FID between real images and model composites using clean-fid.
+
+    Saves real and fake image sets to temp directories, calls clean-fid,
+    then cleans up. Returns FID score (lower = better).
+
+    Args:
+        model: trained inpainting model
+        loader: DataLoader yielding (images, masks, boundaries)
+        device: compute device
+        results_dir: path to save temporary image directories
+        run_name: unique identifier for temp dirs (e.g., "phase4_L4_full")
+        use_bf16: whether to use bfloat16 autocast
+        max_batches: limit number of batches (None = all)
+
+    Returns:
+        fid_score (float), or -1.0 if clean-fid is not available
+    """
+    if not FID_AVAILABLE:
+        print("  FID skipped: clean-fid not installed.")
+        return -1.0
+
+    real_dir = Path(results_dir) / f"fid_tmp_{run_name}_real"
+    fake_dir = Path(results_dir) / f"fid_tmp_{run_name}_fake"
+    real_dir.mkdir(parents=True, exist_ok=True)
+    fake_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        from PIL import Image as PILImage
+        import numpy as np
+
+        if use_bf16 and torch.cuda.is_available():
+            ctx = torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16)
+        else:
+            ctx = torch.amp.autocast(device_type="cpu", dtype=torch.float32, enabled=False)
+
+        model.eval()
+        img_count = 0
+
+        with torch.no_grad():
+            for batch_idx, (images, masks, boundaries) in enumerate(loader):
+                if max_batches is not None and batch_idx >= max_batches:
+                    break
+
+                images     = images.to(device, non_blocking=True)
+                masks      = masks.to(device, non_blocking=True)
+                boundaries = boundaries.to(device, non_blocking=True)
+                masked_in  = images * (1.0 - masks)
+
+                with ctx:
+                    pred_dict = model(masked_in, masks, boundaries)
+                pred = pred_dict["output"].float().clamp(0, 1)
+                comp = images * (1.0 - masks) + pred * masks
+
+                for i in range(images.shape[0]):
+                    real_np = (images[i].cpu().permute(1, 2, 0).numpy() * 255).astype(np.uint8)
+                    fake_np = (comp[i].cpu().permute(1, 2, 0).numpy() * 255).astype(np.uint8)
+                    PILImage.fromarray(real_np).save(real_dir / f"{img_count:06d}.png")
+                    PILImage.fromarray(fake_np).save(fake_dir / f"{img_count:06d}.png")
+                    img_count += 1
+
+        print(f"  FID: evaluating {img_count} images...")
+        score = clean_fid_module.compute_fid(
+            str(real_dir), str(fake_dir),
+            device=str(device), verbose=False,
+        )
+        print(f"  FID = {score:.2f}")
+        return float(score)
+
+    finally:
+        shutil.rmtree(real_dir, ignore_errors=True)
+        shutil.rmtree(fake_dir, ignore_errors=True)

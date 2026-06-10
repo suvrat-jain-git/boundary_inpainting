@@ -209,16 +209,6 @@ class SpectralBoundaryCoherenceLoss(nn.Module):
         self.n_samples = n_samples
         self.spectral_mode = spectral_mode
 
-    def _fft_repr(self, patch: torch.Tensor) -> torch.Tensor:
-        """Compute FFT representation of a patch."""
-        fft = torch.fft.fft2(patch)
-        if self.spectral_mode == "magnitude":
-            return torch.abs(fft)
-        elif self.spectral_mode == "log_magnitude":
-            return torch.log(torch.abs(fft) + 1e-8)
-        elif self.spectral_mode == "complex":
-            return torch.view_as_real(fft).flatten(-2)  # (C, H, W, 2) → (C, H, W*2)
-
     def forward(
         self,
         pred: torch.Tensor,
@@ -233,7 +223,10 @@ class SpectralBoundaryCoherenceLoss(nn.Module):
         comp = target * (1 - mask) + pred * mask
 
         band_flat = boundary_band.view(B, -1)   # (B, H*W)
-        patch_losses: List[torch.Tensor] = []
+
+        # Collect all valid full-size patches across the batch (vectorized)
+        patches_comp:   List[torch.Tensor] = []
+        patches_target: List[torch.Tensor] = []
 
         for b in range(B):
             nz = torch.nonzero(band_flat[b] > 0.5, as_tuple=False)   # (N, 1)
@@ -250,22 +243,39 @@ class SpectralBoundaryCoherenceLoss(nn.Module):
                 y1 = min(H, y0 + ps)
                 x1 = min(W, x0 + ps)
 
-                if (y1 - y0) < ps // 2 or (x1 - x0) < ps // 2:
+                # Only keep full-size patches to allow batching
+                if (y1 - y0) != ps or (x1 - x0) != ps:
                     continue
 
-                p_comp = comp[b, :, y0:y1, x0:x1]
-                p_target = target[b, :, y0:y1, x0:x1]
+                patches_comp.append(comp[b, :, y0:y1, x0:x1])
+                patches_target.append(target[b, :, y0:y1, x0:x1])
 
-                repr_comp = self._fft_repr(p_comp)
-                repr_target = self._fft_repr(p_target)
+        if not patches_comp:
+            # No boundary pixels — return zero with gradient connection
+            return pred.sum() * 0.0
 
-                patch_losses.append(F.l1_loss(repr_comp, repr_target.detach()))
+        # Single batched FFT call instead of K×B separate calls
+        p_comp = torch.stack(patches_comp, dim=0)    # (N, C, ps, ps)
+        p_tgt  = torch.stack(patches_target, dim=0)  # (N, C, ps, ps)
 
-        if patch_losses:
-            return torch.stack(patch_losses).mean()
+        fft_comp = torch.fft.fft2(p_comp)    # (N, C, ps, ps) complex
+        fft_tgt  = torch.fft.fft2(p_tgt)
 
-        # No boundary pixels — return zero with gradient connection
-        return pred.sum() * 0.0
+        repr_comp   = self._fft_repr_batch(fft_comp)
+        repr_target = self._fft_repr_batch(fft_tgt)
+
+        return F.l1_loss(repr_comp, repr_target.detach())
+
+    def _fft_repr_batch(self, fft: torch.Tensor) -> torch.Tensor:
+        """Apply spectral_mode to a batch of complex FFT tensors."""
+        if self.spectral_mode == "magnitude":
+            return torch.abs(fft)
+        elif self.spectral_mode == "log_magnitude":
+            return torch.log(torch.abs(fft) + 1e-8)
+        elif self.spectral_mode == "complex":
+            return torch.view_as_real(fft).flatten(-2)
+        else:
+            raise ValueError(self.spectral_mode)
 
 
 # ── TV Loss ────────────────────────────────────────────────────────────────────
@@ -285,7 +295,146 @@ class TVLoss(nn.Module):
         return diff_h.mean() + diff_w.mean()
 
 
-# ── Combined Loss Manager ──────────────────────────────────────────────────────
+# ── Adaptive Spectral Boundary Coherence Loss (ASBC) ──────────────────────────
+
+class AdaptiveSpectralBoundaryCoherenceLoss(nn.Module):
+    """
+    PAPER NOVELTY: Adaptive Spectral Boundary Coherence Loss (ASBC).
+
+    Hypothesis: Different radial frequency bands contribute unequally to
+    visible seam artifacts. Low frequencies govern color continuity; high
+    frequencies govern texture sharpness. A fixed uniform spectral loss treats
+    all bands identically; ASBC learns their optimal relative weighting end-to-end.
+
+    Mechanism:
+      1. Sample K boundary patches from each image (same as SpectralBoundaryCoherenceLoss)
+      2. Compute FFT magnitude for each patch → stack into (N, C, ps, ps) batch
+      3. Create R radial frequency-band masks (equal-radius bins)
+      4. For each band r: loss_r = mean(|mag_comp - mag_tgt| * band_mask_r)
+      5. Weighted sum: L = sum_r w_r * loss_r  where w = softmax(log_band_weights)
+      6. Anti-collapse regularizer: -λ_reg * H(w)  (entropy; keeps weights spread)
+
+    Anti-collapse: Without regularization the model could collapse all weight
+    onto the easiest band. The entropy term -H(w) = sum_r w_r * log(w_r)
+    is subtracted (i.e., we add +λ*H(w)) to encourage spread.
+
+    Interpretation of learned weights: log them every epoch during training
+    (trainer.py does this). The histogram of w_r in the final trained model
+    should be non-uniform — this is Figure X in the paper showing that low/mid
+    frequencies dominate for boundary coherence.
+
+    Args:
+        n_bands: number of radial frequency bins (default 4)
+        patch_size: square patch size in pixels (default 16)
+        n_samples: K — patches sampled per image (default 8)
+        reg_weight: entropy regularizer coefficient (default 0.01)
+    """
+
+    def __init__(
+        self,
+        n_bands: int = 4,
+        patch_size: int = 16,
+        n_samples: int = 8,
+        reg_weight: float = 0.01,
+    ):
+        super().__init__()
+        self.n_bands = n_bands
+        self.patch_size = patch_size
+        self.n_samples = n_samples
+        self.reg_weight = reg_weight
+
+        # Learnable log-weights (softmax-normalized in forward)
+        self.log_band_weights = nn.Parameter(torch.zeros(n_bands))
+
+        # Precompute radial band masks: (n_bands, ps, ps)
+        ps = patch_size
+        cy, cx = ps / 2.0, ps / 2.0
+        y_idx = torch.arange(ps).float()
+        x_idx = torch.arange(ps).float()
+        yy, xx = torch.meshgrid(y_idx, x_idx, indexing="ij")
+        r = torch.sqrt((yy - cy) ** 2 + (xx - cx) ** 2)
+        r_max = r.max().item()
+
+        band_masks = []
+        for i in range(n_bands):
+            lo = i * r_max / n_bands
+            hi = (i + 1) * r_max / n_bands
+            mask = ((r >= lo) & (r < hi)).float()
+            band_masks.append(mask)
+
+        # (n_bands, ps, ps)
+        self.register_buffer("band_masks", torch.stack(band_masks, dim=0))
+
+    def get_band_weights(self) -> torch.Tensor:
+        """Return normalized band weights (for logging)."""
+        return torch.softmax(self.log_band_weights, dim=0).detach().cpu()
+
+    def forward(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        mask: torch.Tensor,
+        boundary_band: torch.Tensor,
+    ) -> torch.Tensor:
+        B, C, H, W = pred.shape
+        ps = self.patch_size
+
+        comp = target * (1 - mask) + pred * mask
+        band_flat = boundary_band.view(B, -1)
+
+        # Collect all full-size patches across the batch
+        patches_comp:   List[torch.Tensor] = []
+        patches_target: List[torch.Tensor] = []
+
+        for b in range(B):
+            nz = torch.nonzero(band_flat[b] > 0.5, as_tuple=False)
+            if len(nz) < 4:
+                continue
+
+            n_draw = min(self.n_samples, len(nz))
+            indices = nz[torch.randperm(len(nz), device=pred.device)[:n_draw], 0]
+
+            for idx in indices:
+                y, x = int(idx) // W, int(idx) % W
+                y0 = max(0, y - ps // 2)
+                x0 = max(0, x - ps // 2)
+                y1 = min(H, y0 + ps)
+                x1 = min(W, x0 + ps)
+
+                if (y1 - y0) != ps or (x1 - x0) != ps:
+                    continue
+
+                patches_comp.append(comp[b, :, y0:y1, x0:x1])
+                patches_target.append(target[b, :, y0:y1, x0:x1])
+
+        if not patches_comp:
+            return pred.sum() * 0.0
+
+        # Single batched FFT — (N, C, ps, ps)
+        p_comp = torch.stack(patches_comp, dim=0)
+        p_tgt  = torch.stack(patches_target, dim=0)
+
+        mag_comp = torch.abs(torch.fft.fft2(p_comp))       # (N, C, ps, ps)
+        mag_tgt  = torch.abs(torch.fft.fft2(p_tgt)).detach()  # no grad through target
+
+        # Per-band L1 difference
+        # diff: (N, C, ps, ps)
+        # band_masks: (R, ps, ps) → expand to (1, 1, R, ps, ps)
+        diff = torch.abs(mag_comp - mag_tgt)                          # (N, C, ps, ps)
+        bm   = self.band_masks.unsqueeze(0).unsqueeze(0)              # (1, 1, R, ps, ps)
+        diff_banded = diff.unsqueeze(2) * bm                          # (N, C, R, ps, ps)
+        # Mean over pixels and channels for each band: (N, R) → mean over N: (R,)
+        per_band_loss = diff_banded.mean(dim=(0, 1, 3, 4))            # (R,)
+
+        # Normalized band weights via softmax
+        weights = torch.softmax(self.log_band_weights, dim=0)         # (R,)
+        weighted_loss = (per_band_loss * weights).sum()
+
+        # Anti-collapse entropy regularizer: maximize entropy → add +λ*H(w)
+        entropy = -(weights * (weights + 1e-8).log()).sum()
+        loss = weighted_loss - self.reg_weight * entropy
+
+        return loss
 
 class InpaintingLossManager:
     """
@@ -304,6 +453,8 @@ class InpaintingLossManager:
     def __init__(self, cfg: LossConfig, device: torch.device):
         self.cfg = cfg
         self.device = device
+        # Set to True by trainer on steps where perceptual is skipped
+        self.skip_perceptual: bool = False
 
         self.perceptual = PerceptualLoss().to(device)
         self.uniform_boundary = UniformBoundaryLoss()
@@ -312,6 +463,12 @@ class InpaintingLossManager:
             patch_size=cfg.spectral_patch_size,
             n_samples=cfg.spectral_patches_k,
             spectral_mode="log_magnitude" if cfg.spectral_use_log else "magnitude",
+        ).to(device)
+        self.adaptive_spectral = AdaptiveSpectralBoundaryCoherenceLoss(
+            n_bands=cfg.spectral_n_bands,
+            patch_size=cfg.spectral_patch_size,
+            n_samples=cfg.spectral_patches_k,
+            reg_weight=cfg.spectral_reg_weight,
         ).to(device)
         self.tv = TVLoss()
 
@@ -333,7 +490,11 @@ class InpaintingLossManager:
 
         losses["hole_l1"] = (torch.abs(pred - target) * hole_mask).sum() / n_hole
         losses["valid_l1"] = (torch.abs(pred - target) * valid_mask).sum() / n_valid
-        losses["perceptual"] = self.perceptual(pred, target)
+
+        if self.skip_perceptual:
+            losses["perceptual"] = torch.zeros(1, device=pred.device, dtype=pred.dtype)[0]
+        else:
+            losses["perceptual"] = self.perceptual(pred, target)
 
         total = (
             self.cfg.hole_weight * losses["hole_l1"]
@@ -350,7 +511,7 @@ class InpaintingLossManager:
             total = total + cfg.boundary_weight * bl
 
         # ── Gradient-weighted boundary ─────────────────────────────────────────
-        if cfg.loss_config in ("boundary_grad", "full"):
+        if cfg.loss_config in ("boundary_grad", "full", "full_adaptive"):
             bl = self.grad_boundary(pred, target, boundary_band)
             losses["boundary"] = bl
             total = total + cfg.boundary_weight * bl
@@ -361,15 +522,21 @@ class InpaintingLossManager:
             losses["spectral"] = sl
             total = total + cfg.spectral_weight * sl
 
+        # ── Adaptive spectral (ASBC — paper novelty) ───────────────────────────
+        if cfg.loss_config in ("adaptive_spectral", "full_adaptive"):
+            sl = self.adaptive_spectral(pred, target, mask, boundary_band)
+            losses["spectral"] = sl
+            total = total + cfg.spectral_weight * sl
+
         # ── TV loss ────────────────────────────────────────────────────────────
-        if cfg.loss_config == "full":
+        if cfg.loss_config in ("full", "full_adaptive"):
             tv = self.tv(pred, mask)
             losses["tv"] = tv
             total = total + cfg.tv_weight * tv
 
         # ── Multi-scale boundary supervision ──────────────────────────────────
         ms_outputs = pred_dict.get("ms_outputs", [])
-        if cfg.loss_config == "full" and ms_outputs:
+        if cfg.loss_config in ("full", "full_adaptive") and ms_outputs:
             ms_total = torch.tensor(0.0, device=self.device)
             for ms_out in ms_outputs:
                 scale = ms_out.shape[2:]

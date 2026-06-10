@@ -327,29 +327,73 @@ class BoundaryAwareInpainter(nn.Module):
         self.cfg = cfg
 
         # ── Encoder ───────────────────────────────────────────────────────────
-        if cfg.backbone == "resnet18":
-            resnet = tvm.resnet18(weights=tvm.ResNet18_Weights.DEFAULT)
-            enc_channels = [64, 64, 128, 256, 512]
-        elif cfg.backbone == "resnet34":
-            resnet = tvm.resnet34(weights=tvm.ResNet34_Weights.DEFAULT)
-            enc_channels = [64, 64, 128, 256, 512]
+        if cfg.backbone in ("resnet18", "resnet34"):
+            if cfg.backbone == "resnet18":
+                resnet = tvm.resnet18(weights=tvm.ResNet18_Weights.DEFAULT)
+            else:
+                resnet = tvm.resnet34(weights=tvm.ResNet34_Weights.DEFAULT)
+            enc_channels = [64, 64, 128, 256, 512]   # e0, e1(/4), e2(/8), e3(/16), e4(/32)
+
+            # Expand conv1: 3 → 4 channels (RGB + mask channel)
+            old_conv = resnet.conv1
+            self.enc_conv1 = nn.Conv2d(4, 64, kernel_size=7, stride=2, padding=3, bias=False)
+            with torch.no_grad():
+                self.enc_conv1.weight[:, :3] = old_conv.weight
+                self.enc_conv1.weight[:, 3:] = old_conv.weight[:, :1]  # init from R channel
+
+            self.enc_bn1 = resnet.bn1
+            self.enc_relu = resnet.relu
+            self.enc_pool = resnet.maxpool
+            self.enc_layer1 = resnet.layer1   # /4,  64 ch
+            self.enc_layer2 = resnet.layer2   # /8,  128 ch
+            self.enc_layer3 = resnet.layer3   # /16, 256 ch
+            self.enc_layer4 = resnet.layer4   # /32, 512 ch
+            self._encoder_type = "resnet"
+
+        elif cfg.backbone == "convnext_tiny":
+            # ConvNeXt-Tiny: 4-stage feature extractor via timm
+            # Native channels: 96 / 192 / 384 / 768 at strides /4 /8 /16 /32
+            # We project to standard decoder dims (64 / 128 / 256 / 512) with 1×1 convs
+            # so the decoder can remain completely unchanged.
+            try:
+                import timm
+            except ImportError as e:
+                raise ImportError("timm is required for convnext_tiny backbone. "
+                                  "pip install timm>=0.9.0") from e
+
+            _backbone = timm.create_model(
+                "convnext_tiny",
+                pretrained=True,
+                features_only=True,
+                out_indices=(0, 1, 2, 3),
+            )
+            # Patch first conv in stem: 3 → 4 input channels
+            old_stem_conv = _backbone.stem[0]
+            new_stem_conv = nn.Conv2d(
+                4, old_stem_conv.out_channels,
+                kernel_size=old_stem_conv.kernel_size,
+                stride=old_stem_conv.stride,
+                padding=old_stem_conv.padding,
+                bias=old_stem_conv.bias is not None,
+            )
+            with torch.no_grad():
+                new_stem_conv.weight[:, :3] = old_stem_conv.weight
+                new_stem_conv.weight[:, 3:] = old_stem_conv.weight[:, :1]
+                if old_stem_conv.bias is not None:
+                    new_stem_conv.bias.copy_(old_stem_conv.bias)
+            _backbone.stem[0] = new_stem_conv
+            self.enc_convnext = _backbone
+            # 1×1 channel projectors: ConvNeXt dims → standard dims
+            self.enc_proj0 = nn.Sequential(nn.Conv2d(96,  64,  1), nn.BatchNorm2d(64),  nn.ELU(inplace=True))
+            self.enc_proj1 = nn.Sequential(nn.Conv2d(192, 128, 1), nn.BatchNorm2d(128), nn.ELU(inplace=True))
+            self.enc_proj2 = nn.Sequential(nn.Conv2d(384, 256, 1), nn.BatchNorm2d(256), nn.ELU(inplace=True))
+            self.enc_proj3 = nn.Sequential(nn.Conv2d(768, 512, 1), nn.BatchNorm2d(512), nn.ELU(inplace=True))
+            enc_channels = [64, 64, 128, 256, 512]   # after projection; e0 stub = 64
+            self._encoder_type = "convnext"
+
         else:
-            raise ValueError(f"Unsupported backbone: {cfg.backbone}")
-
-        # Expand conv1: 3 → 4 channels (RGB + mask channel)
-        old_conv = resnet.conv1
-        self.enc_conv1 = nn.Conv2d(4, 64, kernel_size=7, stride=2, padding=3, bias=False)
-        with torch.no_grad():
-            self.enc_conv1.weight[:, :3] = old_conv.weight
-            self.enc_conv1.weight[:, 3:] = old_conv.weight[:, :1]  # init from R channel
-
-        self.enc_bn1 = resnet.bn1
-        self.enc_relu = resnet.relu
-        self.enc_pool = resnet.maxpool
-        self.enc_layer1 = resnet.layer1   # /4,  64 ch
-        self.enc_layer2 = resnet.layer2   # /8,  128 ch
-        self.enc_layer3 = resnet.layer3   # /16, 256 ch
-        self.enc_layer4 = resnet.layer4   # /32, 512 ch
+            raise ValueError(f"Unsupported backbone: {cfg.backbone}. "
+                             f"Choose from: resnet18, resnet34, convnext_tiny")
 
         # ── Transformer Bottleneck (NEW) ───────────────────────────────────────
         if cfg.use_transformer_bottleneck:
@@ -428,12 +472,22 @@ class BoundaryAwareInpainter(nn.Module):
         enc_in = torch.cat([x, mask], dim=1)
 
         # ── Encoder ───────────────────────────────────────────────────────────
-        e0 = self.enc_relu(self.enc_bn1(self.enc_conv1(enc_in)))  # /2,  64
-        e0p = self.enc_pool(e0)                                    # /4,  64
-        e1 = self.enc_layer1(e0p)                                  # /4,  64
-        e2 = self.enc_layer2(e1)                                   # /8,  128
-        e3 = self.enc_layer3(e2)                                   # /16, 256
-        e4 = self.enc_layer4(e3)                                   # /32, 512
+        if self._encoder_type == "resnet":
+            e0 = self.enc_relu(self.enc_bn1(self.enc_conv1(enc_in)))  # /2,  64
+            e0p = self.enc_pool(e0)                                    # /4,  64
+            e1 = self.enc_layer1(e0p)                                  # /4,  64
+            e2 = self.enc_layer2(e1)                                   # /8,  128
+            e3 = self.enc_layer3(e2)                                   # /16, 256
+            e4 = self.enc_layer4(e3)                                   # /32, 512
+        else:
+            # ConvNeXt-Tiny: features_only gives [s0,s1,s2,s3] at /4,/8,/16,/32
+            feats = self.enc_convnext(enc_in)
+            e1 = self.enc_proj0(feats[0])   # /4,  64
+            e2 = self.enc_proj1(feats[1])   # /8,  128
+            e3 = self.enc_proj2(feats[2])   # /16, 256
+            e4 = self.enc_proj3(feats[3])   # /32, 512
+            # No /2 features in ConvNeXt → create a stub by upsampling e1
+            e0 = F.interpolate(e1, scale_factor=2, mode="bilinear", align_corners=False)
 
         # ── Transformer Bottleneck ─────────────────────────────────────────────
         e4 = self.transformer_bottleneck(e4)                       # /32, 512
@@ -499,6 +553,7 @@ def build_model(cfg: ModelConfig, device: torch.device) -> BoundaryAwareInpainte
     model = BoundaryAwareInpainter(cfg).to(device)
     n_params = model.count_parameters() / 1e6
     print(f"Model built: {cfg.backbone} | params={n_params:.2f}M")
+    print(f"  Encoder type:           {model._encoder_type}")
     print(f"  Transformer bottleneck: {cfg.use_transformer_bottleneck}")
     print(f"  Bilinear upsample:      {cfg.use_bilinear_upsample}")
     print(f"  Boundary conditioning:  {cfg.use_boundary_conditioning}")

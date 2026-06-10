@@ -1,0 +1,549 @@
+Initialising Colab environment...
+  Google Drive already mounted.
+  Code: 0 file(s) copied, 19 already current.
+  Checkpoints: nothing new to restore.
+  Results: nothing new to restore.
+Init done.
+
+Auto-save started (every 20 min, background daemon).
+  Data check passed.
+── colab_setup status ────────────────────────────────────────
+  Local checkpoints : 10 .pt file(s)
+  Not yet on Drive  : 0  (none)
+  Completed runs    : 4
+  Not yet on Drive  : 0  (none)
+  Drive tarballs    : 5 checkpoint, 4 results
+─────────────────────────────────────────────────────────────
+Logging to: results/run_pipeline.log
+2026-06-07 04:39:19,537 | NumExpr defaulting to 12 threads.
+  Pipeline state loaded (4 completed runs).
+2026-06-07 04:39:20,433 | Device:    cuda
+2026-06-07 04:39:20,454 | GPU:       NVIDIA A100-SXM4-80GB
+2026-06-07 04:39:20,455 | VRAM:      85.1 GB
+2026-06-07 04:39:20,455 | Precision: bfloat16
+2026-06-07 04:39:20,455 | epochs_per_phase = 5
+2026-06-07 04:39:20,455 | epochs_full      = 12  (all phase-4 configs, fair equal)
+2026-06-07 04:39:20,455 | test_fraction    = 1.0
+2026-06-07 04:39:20,455 | Setting up data...
+Created splits → train=25550, val=5475, test=5475
+CelebA/face dataset not found — cross-domain face eval will be skipped.
+Created splits → train=3947, val=846, test=847
+  Generating 500 cached masks (prefix='val') ...
+    50/500 masks cached
+    100/500 masks cached
+    150/500 masks cached
+    200/500 masks cached
+    250/500 masks cached
+    300/500 masks cached
+    350/500 masks cached
+    400/500 masks cached
+    450/500 masks cached
+    500/500 masks cached
+  Generating 1000 cached masks (prefix='test') ...
+    100/1000 masks cached
+    200/1000 masks cached
+    300/1000 masks cached
+    400/1000 masks cached
+    500/1000 masks cached
+    600/1000 masks cached
+    700/1000 masks cached
+    800/1000 masks cached
+    900/1000 masks cached
+    1000/1000 masks cached
+
+Dataset sizes (test_fraction=1.0):
+  fast train : 25550 images
+  fast val   : 5475   images
+  fast test  : 5475  images
+  full train : 25550 images
+  full val   : 5475   images
+  full test  : 5475  images
+2026-06-07 04:44:31,538 | 
+[Phases 1-3 skipped] Using: resnet34 + attn_skip + gated_conv
+2026-06-07 04:44:31,539 | 
+[Phase 4] Loss ablation (6 configs × epochs_full=12)
+
+============================================================
+PHASE 4: Loss Ablation Study  (seed=42)
+  NOTE: ALL configs trained for epochs_full=12 (fair equal training)
+============================================================
+  Skipping phase4_L0_base_seed42 (already done)
+  Skipping phase4_L1_boundary_uniform_seed42 (already done)
+  Skipping phase4_L2_boundary_grad_seed42 (already done)
+  Skipping phase4_L3_spectral_only_seed42 (already done)
+  Loading checkpoint: checkpoints/phase4_L3c_adaptive_spectral.pt
+Downloading: "https://download.pytorch.org/models/resnet34-b627a593.pth" to /root/.cache/torch/hub/checkpoints/resnet34-b627a593.pth
+
+  0%|          | 0.00/83.3M [00:00<?, ?B/s]
+ 21%|██        | 17.6M/83.3M [00:00<00:00, 185MB/s]
+ 47%|████▋     | 38.8M/83.3M [00:00<00:00, 206MB/s]
+ 71%|███████▏  | 59.4M/83.3M [00:00<00:00, 210MB/s]
+ 97%|█████████▋| 80.6M/83.3M [00:00<00:00, 215MB/s]
+100%|██████████| 83.3M/83.3M [00:00<00:00, 211MB/s]
+Downloading: "https://download.pytorch.org/models/vgg16-397923af.pth" to /root/.cache/torch/hub/checkpoints/vgg16-397923af.pth
+
+  0%|          | 0.00/528M [00:00<?, ?B/s]
+  1%|▏         | 7.38M/528M [00:00<00:07, 76.6MB/s]
+  3%|▎         | 14.8M/528M [00:00<00:07, 74.6MB/s]
+  7%|▋         | 37.9M/528M [00:00<00:03, 149MB/s] 
+ 12%|█▏        | 61.4M/528M [00:00<00:02, 187MB/s]
+ 16%|█▌        | 84.5M/528M [00:00<00:02, 207MB/s]
+ 20%|██        | 108M/528M [00:00<00:02, 219MB/s] 
+ 25%|██▍       | 131M/528M [00:00<00:01, 225MB/s]
+ 29%|██▉       | 154M/528M [00:00<00:01, 231MB/s]
+ 34%|███▎      | 177M/528M [00:00<00:01, 235MB/s]
+ 38%|███▊      | 200M/528M [00:01<00:01, 237MB/s]
+ 42%|████▏     | 223M/528M [00:01<00:01, 238MB/s]
+ 47%|████▋     | 246M/528M [00:01<00:01, 240MB/s]
+ 51%|█████     | 270M/528M [00:01<00:01, 241MB/s]
+ 56%|█████▌    | 293M/528M [00:01<00:01, 242MB/s]
+ 60%|█████▉    | 316M/528M [00:01<00:00, 242MB/s]
+ 64%|██████▍   | 340M/528M [00:01<00:00, 243MB/s]
+ 69%|██████▉   | 363M/528M [00:01<00:00, 242MB/s]
+ 73%|███████▎  | 387M/528M [00:01<00:00, 243MB/s]
+ 78%|███████▊  | 410M/528M [00:01<00:00, 243MB/s]
+ 82%|████████▏ | 433M/528M [00:02<00:00, 244MB/s]
+ 86%|████████▋ | 456M/528M [00:02<00:00, 242MB/s]
+ 91%|█████████ | 480M/528M [00:02<00:00, 243MB/s]
+ 95%|█████████▌| 503M/528M [00:02<00:00, 243MB/s]
+100%|█████████▉| 527M/528M [00:02<00:00, 244MB/s]
+100%|██████████| 528M/528M [00:02<00:00, 229MB/s]
+
+============================================================
+EXPERIMENT: phase4_L4_full_method
+  Loss config  : full
+  Max epochs   : 12
+  Val every    : 2 epoch(s)
+  Freeze enc   : first 1 epoch(s)
+  Patience     : 4
+  Device       : cuda
+  Precision    : bfloat16
+  EMA          : True
+  Val batches  : all
+  Perc every   : 4 step(s)
+============================================================
+
+[auto_save tick 1 @ 04:59]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_045915.tar.gz
+  Epoch   1/12 | train total=2.1753  hole=0.1535  bound=0.0130  spec=1.0076  tv=0.0147 | val total=nan  val_bound=0.0000 | lr=1.50e-04 | 1476s
+  [Epoch 2] Encoder unfrozen.
+
+[auto_save tick 2 @ 05:19]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_051915.tar.gz
+  Epoch   2/12 | train total=1.9146  hole=0.1335  bound=0.0106  spec=0.9406  tv=0.0147 | val total=2.9530  val_bound=0.0193 | lr=3.00e-04 | 2949s
+
+[auto_save tick 3 @ 05:39]
+  Checkpoints: 2 file(s) → ckpt_20260607_053915.tar.gz
+  Results: 0 run(s), 1 file(s) → results_20260607_053930.tar.gz
+  Epoch   3/12 | train total=1.8338  hole=0.1274  bound=0.0097  spec=0.9184  tv=0.0147 | val total=nan  val_bound=0.0000 | lr=3.00e-04 | 4397s
+
+[auto_save tick 4 @ 05:59]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_055930.tar.gz
+
+[auto_save tick 5 @ 06:19]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_061930.tar.gz
+  Epoch   4/12 | train total=1.7792  hole=0.1241  bound=0.0093  spec=0.8919  tv=0.0149 | val total=2.5797  val_bound=0.0155 | lr=2.93e-04 | 5829s
+
+[auto_save tick 6 @ 06:39]
+  Checkpoints: 2 file(s) → ckpt_20260607_063930.tar.gz
+  Results: 0 run(s), 1 file(s) → results_20260607_063946.tar.gz
+  Epoch   5/12 | train total=1.7425  hole=0.1211  bound=0.0090  spec=0.8798  tv=0.0150 | val total=nan  val_bound=0.0000 | lr=2.71e-04 | 7277s
+
+[auto_save tick 7 @ 06:59]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_065946.tar.gz
+  Epoch   6/12 | train total=1.7192  hole=0.1188  bound=0.0088  spec=0.8752  tv=0.0150 | val total=2.1181  val_bound=0.0115 | lr=2.38e-04 | 8739s
+
+[auto_save tick 8 @ 07:19]
+  Checkpoints: 2 file(s) → ckpt_20260607_071946.tar.gz
+  Results: 0 run(s), 1 file(s) → results_20260607_072001.tar.gz
+  Epoch   7/12 | train total=1.6912  hole=0.1173  bound=0.0086  spec=0.8598  tv=0.0150 | val total=nan  val_bound=0.0000 | lr=1.97e-04 | 10176s
+
+[auto_save tick 9 @ 07:40]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_074001.tar.gz
+  Epoch   8/12 | train total=1.6709  hole=0.1156  bound=0.0084  spec=0.8537  tv=0.0151 | val total=1.7834  val_bound=0.0089 | lr=1.50e-04 | 11620s
+
+[auto_save tick 10 @ 08:00]
+  Checkpoints: 2 file(s) → ckpt_20260607_080001.tar.gz
+  Results: 0 run(s), 1 file(s) → results_20260607_080017.tar.gz
+
+[auto_save tick 11 @ 08:20]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_082017.tar.gz
+  Epoch   9/12 | train total=1.6565  hole=0.1143  bound=0.0083  spec=0.8490  tv=0.0151 | val total=nan  val_bound=0.0000 | lr=1.04e-04 | 13058s
+
+[auto_save tick 12 @ 08:40]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_084017.tar.gz
+  Epoch  10/12 | train total=1.6298  hole=0.1127  bound=0.0082  spec=0.8351  tv=0.0152 | val total=1.5963  val_bound=0.0079 | lr=6.26e-05 | 14506s
+
+[auto_save tick 13 @ 09:00]
+  Checkpoints: 2 file(s) → ckpt_20260607_090017.tar.gz
+  Results: 0 run(s), 1 file(s) → results_20260607_090032.tar.gz
+  Epoch  11/12 | train total=1.6225  hole=0.1120  bound=0.0081  spec=0.8336  tv=0.0153 | val total=nan  val_bound=0.0000 | lr=2.96e-05 | 15948s
+
+[auto_save tick 14 @ 09:20]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_092032.tar.gz
+  Epoch  12/12 | train total=1.6122  hole=0.1112  bound=0.0080  spec=0.8292  tv=0.0153 | val total=1.5160  val_bound=0.0077 | lr=8.32e-06 | 17402s
+  Done in 290.0 min. Best val loss: 1.5160
+  Checkpoint : checkpoints/phase4_L4_full_method.pt
+  EMA ckpt   : checkpoints/phase4_L4_full_method_ema.pt
+  Saved: training_curves.png
+2026-06-07 09:35:59,598 | 
+[Multi-seed] L0 + L4 with seeds [42, 1, 2]
+
+============================================================
+MULTI-SEED RUNS  (seeds=(42, 1, 2), configs=L0+L4)
+============================================================
+  Skipping phase4_L0_base_seed42 (already done)
+
+============================================================
+EXPERIMENT: multiseed_L0_base_seed1
+  Loss config  : base
+  Max epochs   : 12
+  Val every    : 2 epoch(s)
+  Freeze enc   : first 1 epoch(s)
+  Patience     : 4
+  Device       : cuda
+  Precision    : bfloat16
+  EMA          : True
+  Val batches  : all
+  Perc every   : 4 step(s)
+============================================================
+
+[auto_save tick 15 @ 09:40]
+  Checkpoints: 2 file(s) → ckpt_20260607_094032.tar.gz
+  Results: 1 run(s), 2 file(s) → results_20260607_094048.tar.gz
+  Epoch   1/12 | train total=0.9569  hole=0.1427  bound=0.0000  spec=0.0000  tv=0.0000 | val total=nan  val_bound=0.0000 | lr=1.50e-04 | 1440s
+  [Epoch 2] Encoder unfrozen.
+
+[auto_save tick 16 @ 10:00]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_100048.tar.gz
+
+[auto_save tick 17 @ 10:20]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_102048.tar.gz
+  Epoch   2/12 | train total=0.7945  hole=0.1227  bound=0.0000  spec=0.0000  tv=0.0000 | val total=1.5393  val_bound=0.0000 | lr=3.00e-04 | 2887s
+
+[auto_save tick 18 @ 10:40]
+  Checkpoints: 2 file(s) → ckpt_20260607_104048.tar.gz
+  Results: 0 run(s), 1 file(s) → results_20260607_104103.tar.gz
+  Epoch   3/12 | train total=0.7393  hole=0.1149  bound=0.0000  spec=0.0000  tv=0.0000 | val total=nan  val_bound=0.0000 | lr=3.00e-04 | 4331s
+
+[auto_save tick 19 @ 11:01]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_110103.tar.gz
+  Epoch   4/12 | train total=0.7217  hole=0.1124  bound=0.0000  spec=0.0000  tv=0.0000 | val total=1.2503  val_bound=0.0000 | lr=2.93e-04 | 5770s
+
+[auto_save tick 20 @ 11:21]
+  Checkpoints: 2 file(s) → ckpt_20260607_112103.tar.gz
+  Results: 0 run(s), 1 file(s) → results_20260607_112119.tar.gz
+  Epoch   5/12 | train total=0.7035  hole=0.1099  bound=0.0000  spec=0.0000  tv=0.0000 | val total=nan  val_bound=0.0000 | lr=2.71e-04 | 7218s
+
+[auto_save tick 21 @ 11:41]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_114119.tar.gz
+  Epoch   6/12 | train total=0.6955  hole=0.1089  bound=0.0000  spec=0.0000  tv=0.0000 | val total=0.9289  val_bound=0.0000 | lr=2.38e-04 | 8650s
+
+[auto_save tick 22 @ 12:01]
+  Checkpoints: 2 file(s) → ckpt_20260607_120119.tar.gz
+  Results: 0 run(s), 1 file(s) → results_20260607_120134.tar.gz
+
+[auto_save tick 23 @ 12:21]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_122134.tar.gz
+  Epoch   7/12 | train total=0.6864  hole=0.1076  bound=0.0000  spec=0.0000  tv=0.0000 | val total=nan  val_bound=0.0000 | lr=1.97e-04 | 10083s
+
+[auto_save tick 24 @ 12:41]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_124134.tar.gz
+  Epoch   8/12 | train total=0.6793  hole=0.1067  bound=0.0000  spec=0.0000  tv=0.0000 | val total=0.7325  val_bound=0.0000 | lr=1.50e-04 | 11531s
+
+[auto_save tick 25 @ 13:01]
+  Checkpoints: 2 file(s) → ckpt_20260607_130134.tar.gz
+  Results: 0 run(s), 1 file(s) → results_20260607_130150.tar.gz
+  Epoch   9/12 | train total=0.6739  hole=0.1059  bound=0.0000  spec=0.0000  tv=0.0000 | val total=nan  val_bound=0.0000 | lr=1.04e-04 | 12977s
+
+[auto_save tick 26 @ 13:21]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_132150.tar.gz
+  Epoch  10/12 | train total=0.6656  hole=0.1047  bound=0.0000  spec=0.0000  tv=0.0000 | val total=0.6571  val_bound=0.0000 | lr=6.26e-05 | 14417s
+
+[auto_save tick 27 @ 13:41]
+  Checkpoints: 2 file(s) → ckpt_20260607_134150.tar.gz
+  Results: 0 run(s), 1 file(s) → results_20260607_134205.tar.gz
+  Epoch  11/12 | train total=0.6615  hole=0.1041  bound=0.0000  spec=0.0000  tv=0.0000 | val total=nan  val_bound=0.0000 | lr=2.96e-05 | 15858s
+
+[auto_save tick 28 @ 14:02]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_140205.tar.gz
+
+[auto_save tick 29 @ 14:22]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_142205.tar.gz
+  Epoch  12/12 | train total=0.6607  hole=0.1040  bound=0.0000  spec=0.0000  tv=0.0000 | val total=0.6342  val_bound=0.0000 | lr=8.32e-06 | 17299s
+  Done in 288.3 min. Best val loss: 0.6342
+  Checkpoint : checkpoints/multiseed_L0_base_seed1.pt
+  EMA ckpt   : checkpoints/multiseed_L0_base_seed1_ema.pt
+
+============================================================
+EXPERIMENT: multiseed_L0_base_seed2
+  Loss config  : base
+  Max epochs   : 12
+  Val every    : 2 epoch(s)
+  Freeze enc   : first 1 epoch(s)
+  Patience     : 4
+  Device       : cuda
+  Precision    : bfloat16
+  EMA          : True
+  Val batches  : all
+  Perc every   : 4 step(s)
+============================================================
+
+[auto_save tick 30 @ 14:42]
+  Checkpoints: 2 file(s) → ckpt_20260607_144205.tar.gz
+  Results: 1 run(s), 2 file(s) → results_20260607_144220.tar.gz
+  Epoch   1/12 | train total=0.9711  hole=0.1429  bound=0.0000  spec=0.0000  tv=0.0000 | val total=nan  val_bound=0.0000 | lr=1.50e-04 | 1432s
+  [Epoch 2] Encoder unfrozen.
+
+[auto_save tick 31 @ 15:02]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_150220.tar.gz
+  Epoch   2/12 | train total=0.7959  hole=0.1227  bound=0.0000  spec=0.0000  tv=0.0000 | val total=1.5620  val_bound=0.0000 | lr=3.00e-04 | 2879s
+
+[auto_save tick 32 @ 15:22]
+  Checkpoints: 2 file(s) → ckpt_20260607_152220.tar.gz
+  Results: 0 run(s), 1 file(s) → results_20260607_152236.tar.gz
+  Epoch   3/12 | train total=0.7408  hole=0.1150  bound=0.0000  spec=0.0000  tv=0.0000 | val total=nan  val_bound=0.0000 | lr=3.00e-04 | 4320s
+
+[auto_save tick 33 @ 15:42]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_154236.tar.gz
+  Epoch   4/12 | train total=0.7196  hole=0.1122  bound=0.0000  spec=0.0000  tv=0.0000 | val total=1.2580  val_bound=0.0000 | lr=2.93e-04 | 5759s
+
+[auto_save tick 34 @ 16:02]
+  Checkpoints: 2 file(s) → ckpt_20260607_160236.tar.gz
+  Results: 0 run(s), 1 file(s) → results_20260607_160251.tar.gz
+
+[auto_save tick 35 @ 16:22]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_162251.tar.gz
+  Epoch   5/12 | train total=0.7056  hole=0.1104  bound=0.0000  spec=0.0000  tv=0.0000 | val total=nan  val_bound=0.0000 | lr=2.71e-04 | 7191s
+
+[auto_save tick 36 @ 16:42]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_164251.tar.gz
+  Epoch   6/12 | train total=0.6937  hole=0.1087  bound=0.0000  spec=0.0000  tv=0.0000 | val total=0.9185  val_bound=0.0000 | lr=2.38e-04 | 8637s
+
+[auto_save tick 37 @ 17:02]
+  Checkpoints: 2 file(s) → ckpt_20260607_170251.tar.gz
+  Results: 0 run(s), 1 file(s) → results_20260607_170306.tar.gz
+  Epoch   7/12 | train total=0.6874  hole=0.1078  bound=0.0000  spec=0.0000  tv=0.0000 | val total=nan  val_bound=0.0000 | lr=1.97e-04 | 10078s
+
+[auto_save tick 38 @ 17:23]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_172306.tar.gz
+  Epoch   8/12 | train total=0.6794  hole=0.1067  bound=0.0000  spec=0.0000  tv=0.0000 | val total=0.7308  val_bound=0.0000 | lr=1.50e-04 | 11520s
+
+[auto_save tick 39 @ 17:43]
+  Checkpoints: 2 file(s) → ckpt_20260607_174306.tar.gz
+  Results: 0 run(s), 1 file(s) → results_20260607_174321.tar.gz
+  Epoch   9/12 | train total=0.6721  hole=0.1057  bound=0.0000  spec=0.0000  tv=0.0000 | val total=nan  val_bound=0.0000 | lr=1.04e-04 | 12965s
+
+[auto_save tick 40 @ 18:03]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_180321.tar.gz
+
+[auto_save tick 41 @ 18:23]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_182322.tar.gz
+  Epoch  10/12 | train total=0.6653  hole=0.1046  bound=0.0000  spec=0.0000  tv=0.0000 | val total=0.6577  val_bound=0.0000 | lr=6.26e-05 | 14404s
+
+[auto_save tick 42 @ 18:43]
+  Checkpoints: 2 file(s) → ckpt_20260607_184322.tar.gz
+  Results: 0 run(s), 1 file(s) → results_20260607_184337.tar.gz
+  Epoch  11/12 | train total=0.6615  hole=0.1041  bound=0.0000  spec=0.0000  tv=0.0000 | val total=nan  val_bound=0.0000 | lr=2.96e-05 | 15836s
+
+[auto_save tick 43 @ 19:03]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_190337.tar.gz
+  Epoch  12/12 | train total=0.6573  hole=0.1035  bound=0.0000  spec=0.0000  tv=0.0000 | val total=0.6341  val_bound=0.0000 | lr=8.32e-06 | 17274s
+  Done in 287.9 min. Best val loss: 0.6341
+  Checkpoint : checkpoints/multiseed_L0_base_seed2.pt
+  EMA ckpt   : checkpoints/multiseed_L0_base_seed2_ema.pt
+  Skipping phase4_L4_full_method_seed42 (already done)
+
+============================================================
+EXPERIMENT: multiseed_L4_full_method_seed1
+  Loss config  : full
+  Max epochs   : 12
+  Val every    : 2 epoch(s)
+  Freeze enc   : first 1 epoch(s)
+  Patience     : 4
+  Device       : cuda
+  Precision    : bfloat16
+  EMA          : True
+  Val batches  : all
+  Perc every   : 4 step(s)
+============================================================
+
+[auto_save tick 44 @ 19:23]
+  Checkpoints: 2 file(s) → ckpt_20260607_192337.tar.gz
+  Results: 1 run(s), 2 file(s) → results_20260607_192352.tar.gz
+  Epoch   1/12 | train total=2.1702  hole=0.1521  bound=0.0129  spec=1.0096  tv=0.0148 | val total=nan  val_bound=0.0000 | lr=1.50e-04 | 1439s
+  [Epoch 2] Encoder unfrozen.
+
+[auto_save tick 45 @ 19:43]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_194352.tar.gz
+  Epoch   2/12 | train total=1.9103  hole=0.1336  bound=0.0106  spec=0.9363  tv=0.0148 | val total=2.9681  val_bound=0.0194 | lr=3.00e-04 | 2895s
+
+[auto_save tick 46 @ 20:03]
+  Checkpoints: 2 file(s) → ckpt_20260607_200352.tar.gz
+  Results: 0 run(s), 1 file(s) → results_20260607_200408.tar.gz
+
+[auto_save tick 47 @ 20:24]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_202408.tar.gz
+  Epoch   3/12 | train total=1.8325  hole=0.1278  bound=0.0098  spec=0.9132  tv=0.0148 | val total=nan  val_bound=0.0000 | lr=3.00e-04 | 4361s
+
+[auto_save tick 48 @ 20:44]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_204408.tar.gz
+  Epoch   4/12 | train total=1.7910  hole=0.1247  bound=0.0093  spec=0.8996  tv=0.0149 | val total=2.5913  val_bound=0.0155 | lr=2.93e-04 | 5820s
+
+[auto_save tick 49 @ 21:04]
+  Checkpoints: 2 file(s) → ckpt_20260607_210408.tar.gz
+  Results: 0 run(s), 1 file(s) → results_20260607_210424.tar.gz
+  Epoch   5/12 | train total=1.7505  hole=0.1214  bound=0.0090  spec=0.8849  tv=0.0150 | val total=nan  val_bound=0.0000 | lr=2.71e-04 | 7264s
+
+[auto_save tick 50 @ 21:24]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_212424.tar.gz
+  Epoch   6/12 | train total=1.7337  hole=0.1200  bound=0.0088  spec=0.8808  tv=0.0150 | val total=2.1273  val_bound=0.0114 | lr=2.38e-04 | 8708s
+
+[auto_save tick 51 @ 21:44]
+  Checkpoints: 2 file(s) → ckpt_20260607_214424.tar.gz
+  Results: 0 run(s), 1 file(s) → results_20260607_214440.tar.gz
+  Epoch   7/12 | train total=1.6894  hole=0.1177  bound=0.0086  spec=0.8547  tv=0.0151 | val total=nan  val_bound=0.0000 | lr=1.97e-04 | 10151s
+
+[auto_save tick 52 @ 22:04]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_220440.tar.gz
+
+[auto_save tick 53 @ 22:24]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_222440.tar.gz
+  Epoch   8/12 | train total=1.6796  hole=0.1164  bound=0.0085  spec=0.8565  tv=0.0151 | val total=1.7831  val_bound=0.0088 | lr=1.50e-04 | 11605s
+
+[auto_save tick 54 @ 22:44]
+  Checkpoints: 2 file(s) → ckpt_20260607_224440.tar.gz
+  Results: 0 run(s), 1 file(s) → results_20260607_224455.tar.gz
+  Epoch   9/12 | train total=1.6529  hole=0.1146  bound=0.0083  spec=0.8444  tv=0.0152 | val total=nan  val_bound=0.0000 | lr=1.04e-04 | 13050s
+
+[auto_save tick 55 @ 23:04]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_230455.tar.gz
+  Epoch  10/12 | train total=1.6373  hole=0.1131  bound=0.0081  spec=0.8398  tv=0.0152 | val total=1.5997  val_bound=0.0079 | lr=6.26e-05 | 14496s
+
+[auto_save tick 56 @ 23:24]
+  Checkpoints: 2 file(s) → ckpt_20260607_232455.tar.gz
+  Results: 0 run(s), 1 file(s) → results_20260607_232511.tar.gz
+  Epoch  11/12 | train total=1.6290  hole=0.1124  bound=0.0081  spec=0.8378  tv=0.0152 | val total=nan  val_bound=0.0000 | lr=2.96e-05 | 15943s
+
+[auto_save tick 57 @ 23:45]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260607_234511.tar.gz
+  Epoch  12/12 | train total=1.6172  hole=0.1118  bound=0.0080  spec=0.8301  tv=0.0153 | val total=1.5142  val_bound=0.0076 | lr=8.32e-06 | 17398s
+  Done in 290.0 min. Best val loss: 1.5142
+  Checkpoint : checkpoints/multiseed_L4_full_method_seed1.pt
+  EMA ckpt   : checkpoints/multiseed_L4_full_method_seed1_ema.pt
+
+============================================================
+EXPERIMENT: multiseed_L4_full_method_seed2
+  Loss config  : full
+  Max epochs   : 12
+  Val every    : 2 epoch(s)
+  Freeze enc   : first 1 epoch(s)
+  Patience     : 4
+  Device       : cuda
+  Precision    : bfloat16
+  EMA          : True
+  Val batches  : all
+  Perc every   : 4 step(s)
+============================================================
+
+[auto_save tick 58 @ 00:05]
+  Checkpoints: 2 file(s) → ckpt_20260608_000511.tar.gz
+  Results: 1 run(s), 2 file(s) → results_20260608_000526.tar.gz
+
+[auto_save tick 59 @ 00:25]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260608_002526.tar.gz
+  Epoch   1/12 | train total=2.1958  hole=0.1530  bound=0.0132  spec=1.0162  tv=0.0149 | val total=nan  val_bound=0.0000 | lr=1.50e-04 | 1447s
+  [Epoch 2] Encoder unfrozen.
+
+[auto_save tick 60 @ 00:45]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260608_004526.tar.gz
+  Epoch   2/12 | train total=1.9299  hole=0.1343  bound=0.0109  spec=0.9467  tv=0.0148 | val total=2.9906  val_bound=0.0197 | lr=3.00e-04 | 2895s
+
+[auto_save tick 61 @ 01:05]
+  Checkpoints: 2 file(s) → ckpt_20260608_010526.tar.gz
+  Results: 0 run(s), 1 file(s) → results_20260608_010542.tar.gz
+  Epoch   3/12 | train total=1.8292  hole=0.1268  bound=0.0098  spec=0.9158  tv=0.0147 | val total=nan  val_bound=0.0000 | lr=3.00e-04 | 4331s
+
+[auto_save tick 62 @ 01:25]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260608_012542.tar.gz
+  Epoch   4/12 | train total=1.7775  hole=0.1241  bound=0.0093  spec=0.8911  tv=0.0149 | val total=2.6498  val_bound=0.0159 | lr=2.93e-04 | 5781s
+
+[auto_save tick 63 @ 01:45]
+  Checkpoints: 2 file(s) → ckpt_20260608_014542.tar.gz
+  Results: 0 run(s), 1 file(s) → results_20260608_014557.tar.gz
+  Epoch   5/12 | train total=1.7382  hole=0.1209  bound=0.0090  spec=0.8776  tv=0.0150 | val total=nan  val_bound=0.0000 | lr=2.71e-04 | 7216s
+
+[auto_save tick 64 @ 02:05]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260608_020557.tar.gz
+
+[auto_save tick 65 @ 02:25]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260608_022557.tar.gz
+  Epoch   6/12 | train total=1.7151  hole=0.1190  bound=0.0088  spec=0.8701  tv=0.0150 | val total=2.1723  val_bound=0.0118 | lr=2.38e-04 | 8659s
+
+[auto_save tick 66 @ 02:45]
+  Checkpoints: 2 file(s) → ckpt_20260608_024557.tar.gz
+  Results: 0 run(s), 1 file(s) → results_20260608_024612.tar.gz
+  Epoch   7/12 | train total=1.7007  hole=0.1175  bound=0.0086  spec=0.8674  tv=0.0151 | val total=nan  val_bound=0.0000 | lr=1.97e-04 | 10099s
+
+[auto_save tick 67 @ 03:06]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260608_030612.tar.gz
+  Epoch   8/12 | train total=1.6725  hole=0.1159  bound=0.0084  spec=0.8533  tv=0.0150 | val total=1.7839  val_bound=0.0090 | lr=1.50e-04 | 11553s
+
+[auto_save tick 68 @ 03:26]
+  Checkpoints: 2 file(s) → ckpt_20260608_032612.tar.gz
+  Results: 0 run(s), 1 file(s) → results_20260608_032628.tar.gz
+  Epoch   9/12 | train total=1.6464  hole=0.1143  bound=0.0083  spec=0.8394  tv=0.0151 | val total=nan  val_bound=0.0000 | lr=1.04e-04 | 12989s
+
+[auto_save tick 69 @ 03:46]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260608_034628.tar.gz
+  Epoch  10/12 | train total=1.6350  hole=0.1129  bound=0.0082  spec=0.8392  tv=0.0152 | val total=1.6086  val_bound=0.0079 | lr=6.26e-05 | 14446s
+
+[auto_save tick 70 @ 04:06]
+  Checkpoints: 2 file(s) → ckpt_20260608_040628.tar.gz
+  Results: 0 run(s), 1 file(s) → results_20260608_040644.tar.gz
+
+[auto_save tick 71 @ 04:26]
+  Checkpoints: nothing new.
+  Results: 0 run(s), 1 file(s) → results_20260608_042644.tar.gz
+  Epoch  11/12 | train total=1.6273  hole=0.1117  bound=0.0081  spec=0.8402  tv=0.0153 | val total=nan  val_bound=0.0000 | lr=2.96e-05 | 15901s
