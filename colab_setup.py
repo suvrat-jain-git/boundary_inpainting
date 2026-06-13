@@ -359,6 +359,14 @@ def init() -> None:
 
     manifest = _restore_manifest()
 
+    # On a fresh runtime the checkpoints directory is empty even though the
+    # manifest lists all previous tarballs as "already restored".  Reset the
+    # restored-tarball tracking so every tarball is re-extracted.
+    if not any(LOCAL_CKPT.glob("*.pt")):
+        manifest["_restored_ckpt_tarballs"] = []
+    if not any(LOCAL_RES.glob("*.json")):
+        manifest["_restored_res_tarballs"] = []
+
     _, restored_ckpt = _extract_tarballs(
         DRIVE_CKPT, LOCAL_CKPT, "ckpt_*.tar.gz",
         set(manifest.get("_restored_ckpt_tarballs", [])),

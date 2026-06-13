@@ -458,9 +458,20 @@ def run_convnext_runs(data, cfg, device, use_attn_skip, use_gated_conv,
 
 # ── Evaluation ─────────────────────────────────────────────────────────────────
 
+def _resolve_ckpt(path: Path) -> Path:
+    """Return path if it exists, else try the _seed42 variant, else return original."""
+    if path.exists():
+        return path
+    seed42 = path.with_name(path.stem + "_seed42" + path.suffix)
+    if seed42.exists():
+        return seed42
+    return path   # will fail exists() check downstream → skipped
+
+
 def _load_model_for_eval(exp_name, ckpt_path, backbone, use_attn_skip, use_gated_conv,
                          multiscale, device):
     """Load a checkpoint into a model and return it."""
+    ckpt_path = _resolve_ckpt(Path(ckpt_path))
     if not Path(ckpt_path).exists():
         return None
     model_cfg = make_model_cfg(backbone, use_attn_skip, use_gated_conv, multiscale=multiscale)
@@ -505,9 +516,9 @@ def run_evaluation(data, cfg, device, backbone, use_attn_skip, use_gated_conv):
             print(f"  No checkpoint for {exp_name} — skipping")
             continue
 
-        # Use EMA checkpoint if available and this is L4 (best model)
-        ema_ckpt = ckpt_dir / f"phase4_{exp_name}_ema.pt"
-        if ema_ckpt.exists() and exp_name == "L4_full_method":
+        # Use EMA weights for all configs where available
+        ema_ckpt = _resolve_ckpt(ckpt_dir / f"phase4_{exp_name}_ema.pt")
+        if ema_ckpt.exists():
             model.load_state_dict(
                 torch.load(ema_ckpt, map_location=device, weights_only=True),
                 strict=False,

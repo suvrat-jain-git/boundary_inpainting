@@ -351,10 +351,9 @@ class BoundaryAwareInpainter(nn.Module):
             self._encoder_type = "resnet"
 
         elif cfg.backbone == "convnext_tiny":
-            # ConvNeXt-Tiny: 4-stage feature extractor via timm
-            # Native channels: 96 / 192 / 384 / 768 at strides /4 /8 /16 /32
-            # We project to standard decoder dims (64 / 128 / 256 / 512) with 1×1 convs
-            # so the decoder can remain completely unchanged.
+            # ConvNeXt-Tiny: load full model (NOT features_only) so .stem is
+            # directly accessible for the 3→4 channel patch.
+            # We manually extract the 4 stage outputs in forward().
             try:
                 import timm
             except ImportError as e:
@@ -364,8 +363,8 @@ class BoundaryAwareInpainter(nn.Module):
             _backbone = timm.create_model(
                 "convnext_tiny",
                 pretrained=True,
-                features_only=True,
-                out_indices=(0, 1, 2, 3),
+                num_classes=0,
+                global_pool="",
             )
             # Patch first conv in stem: 3 → 4 input channels
             old_stem_conv = _backbone.stem[0]
@@ -480,12 +479,18 @@ class BoundaryAwareInpainter(nn.Module):
             e3 = self.enc_layer3(e2)                                   # /16, 256
             e4 = self.enc_layer4(e3)                                   # /32, 512
         else:
-            # ConvNeXt-Tiny: features_only gives [s0,s1,s2,s3] at /4,/8,/16,/32
-            feats = self.enc_convnext(enc_in)
-            e1 = self.enc_proj0(feats[0])   # /4,  64
-            e2 = self.enc_proj1(feats[1])   # /8,  128
-            e3 = self.enc_proj2(feats[2])   # /16, 256
-            e4 = self.enc_proj3(feats[3])   # /32, 512
+            # ConvNeXt-Tiny: manually run stem + 4 stages to get features at
+            # /4 (96ch), /8 (192ch), /16 (384ch), /32 (768ch)
+            b = self.enc_convnext
+            f = b.stem(enc_in)           # /4,  96ch
+            f0 = b.stages[0](f)          # /4,  96ch  (no downsample in stage 0)
+            f1 = b.stages[1](f0)         # /8,  192ch
+            f2 = b.stages[2](f1)         # /16, 384ch
+            f3 = b.stages[3](f2)         # /32, 768ch
+            e1 = self.enc_proj0(f0)      # /4,  64
+            e2 = self.enc_proj1(f1)      # /8,  128
+            e3 = self.enc_proj2(f2)      # /16, 256
+            e4 = self.enc_proj3(f3)      # /32, 512
             # No /2 features in ConvNeXt → create a stub by upsampling e1
             e0 = F.interpolate(e1, scale_factor=2, mode="bilinear", align_corners=False)
 

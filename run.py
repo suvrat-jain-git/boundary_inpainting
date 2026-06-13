@@ -62,7 +62,8 @@ def log(msg: str):
 def run_pipeline(cfg, skip_download: bool = False,
                   skip_phases123: bool = True,
                   skip_multiseed: bool = False,
-                  skip_convnext:  bool = False):
+                  skip_convnext:  bool = False,
+                  eval_only:      bool = False):
     import gc
     import random
 
@@ -144,18 +145,22 @@ def run_pipeline(cfg, skip_download: bool = False,
         log("\n[Phases 1-3 skipped] Using: resnet34 + attn_skip + gated_conv")
 
     # ── Phase 4: Loss ablation (all configs, equal epochs) ────────────────────
-    log("\n[Phase 4] Loss ablation (6 configs × epochs_full={})".format(cfg.speed.epochs_full))
-    p4_results, p4_histories = run_phase4(
-        data, cfg, device, p1_winner, use_attn_skip, use_gated_conv,
-        state=state, seed=cfg.train.seed,
-    )
-    try:
-        plot_training_curves(p4_histories, results_dir, "Phase 4 Training Curves")
-    except Exception as e:
-        log(f"  Training curves plot warning: {e}")
+    if not eval_only:
+        log("\n[Phase 4] Loss ablation (6 configs × epochs_full={})".format(cfg.speed.epochs_full))
+        p4_results, p4_histories = run_phase4(
+            data, cfg, device, p1_winner, use_attn_skip, use_gated_conv,
+            state=state, seed=cfg.train.seed,
+        )
+        try:
+            plot_training_curves(p4_histories, results_dir, "Phase 4 Training Curves")
+        except Exception as e:
+            log(f"  Training curves plot warning: {e}")
+    else:
+        p4_results, p4_histories = {}, {}
+        log("\n[eval_only] Skipping Phase 4 training — loading existing checkpoints.")
 
     # ── Multi-seed runs (L0 + L4, seeds 42/1/2) ───────────────────────────────
-    if not skip_multiseed:
+    if not skip_multiseed and not eval_only:
         log("\n[Multi-seed] L0 + L4 with seeds [42, 1, 2]")
         multi_results = run_multiseed_l0l4(
             data, cfg, device, p1_winner, use_attn_skip, use_gated_conv,
@@ -165,7 +170,7 @@ def run_pipeline(cfg, skip_download: bool = False,
         multi_results = {}
 
     # ── ConvNeXt runs ─────────────────────────────────────────────────────────
-    if not skip_convnext:
+    if not skip_convnext and not eval_only:
         log("\n[ConvNeXt] C0_base + C4_full with convnext_tiny backbone")
         convnext_results = run_convnext_runs(
             data, cfg, device, use_attn_skip, use_gated_conv,
@@ -256,6 +261,8 @@ if __name__ == "__main__":
                         help="Skip multi-seed L0/L4 runs")
     parser.add_argument("--skip_convnext",  action="store_true",
                         help="Skip ConvNeXt backbone runs")
+    parser.add_argument("--eval_only",      action="store_true",
+                        help="Skip all training, run evaluation+plots only")
     parser.add_argument("--places_dir",    type=str, default=None)
     parser.add_argument("--celeba_dir",    type=str, default=None)
     parser.add_argument("--dtd_dir",       type=str, default=None)
@@ -286,6 +293,7 @@ if __name__ == "__main__":
             skip_phases123=args.skip_phases123 and not args.run_phases123,
             skip_multiseed=args.skip_multiseed,
             skip_convnext=args.skip_convnext,
+            eval_only=args.eval_only,
         )
     except KeyboardInterrupt:
         log("\nInterrupted — pipeline state saved. Re-run to resume.")
