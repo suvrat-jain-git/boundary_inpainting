@@ -19,6 +19,7 @@ ENV/
 checkpoints/
 results/
 datasets/
+download/
 
 # ── Colab runtime artifacts ────────────────────────────────────────────────────
 .colab_manifest.json

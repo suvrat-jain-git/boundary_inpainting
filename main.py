@@ -42,8 +42,8 @@ from models.architecture import BoundaryAwareInpainter, build_model
 from training.trainer import load_or_train, run_experiment, validate, enable_a100_flags
 from utils.visualize import (
     plot_ablation_table, plot_baseline_comparison, plot_mask_coverage,
-    plot_mask_examples, plot_qualitative, plot_sample_grid,
-    plot_sensitivity, plot_training_curves,
+    plot_mask_examples, plot_qualitative, plot_qualitative_boundary_compare,
+    plot_sample_grid, plot_sensitivity, plot_training_curves,
 )
 
 
@@ -328,22 +328,30 @@ def run_phase4(data, cfg, device, backbone, use_attn_skip, use_gated_conv,
 # ── Multi-seed runs for L0 and L4 ─────────────────────────────────────────────
 
 def run_multiseed_l0l4(data, cfg, device, backbone, use_attn_skip, use_gated_conv,
-                       seeds=(42, 1, 2), state: Optional[PipelineState] = None):
+                       seeds=(42, 1, 2), state: Optional[PipelineState] = None,
+                       include_l3c: bool = True):
     """
-    Train L0 (base) and L4 (full) under multiple seeds for statistical reporting.
+    Train L0 (base), L4 (full), and optionally L3c (ASBC) under multiple seeds.
     Seed 42 results are already computed in phase 4 — skip those.
     Returns: {exp_name: [result_seed42, result_seed1, result_seed2, ...]}
     """
+    _l3c_tag = "+L3c" if include_l3c else ""
     print("\n" + "="*60)
-    print(f"MULTI-SEED RUNS  (seeds={seeds}, configs=L0+L4)")
+    print(f"MULTI-SEED RUNS  (seeds={seeds}, configs=L0+L4{_l3c_tag})")
     print("="*60)
 
-    multi_results = {"L0_base": [], "L4_full_method": []}
+    configs = [
+        ("L0_base",              {"loss_config": "base",              "multiscale": False}),
+        ("L4_full_method",       {"loss_config": "full",              "multiscale": True}),
+    ]
+    if include_l3c:
+        configs.append(
+            ("L3c_adaptive_spectral", {"loss_config": "adaptive_spectral", "multiscale": False})
+        )
 
-    for exp_name, exp_cfg in [
-        ("L0_base",       {"loss_config": "base", "multiscale": False}),
-        ("L4_full_method",{"loss_config": "full", "multiscale": True}),
-    ]:
+    multi_results = {name: [] for name, _ in configs}
+
+    for exp_name, exp_cfg in configs:
         for seed in seeds:
             if seed == 42:
                 # Seed 42 was already run in phase 4 — load it
@@ -539,8 +547,8 @@ def run_evaluation(data, cfg, device, backbone, use_attn_skip, use_gated_conv):
         if "lpips" in g:
             print(f"    LPIPS={g['lpips']:.4f}")
 
-        # FID for L4 and ASBC
-        if exp_name in ("L4_full_method", "L3c_adaptive_spectral") and cfg.eval.compute_fid:
+        # FID for all configs (completes the ablation table)
+        if cfg.eval.compute_fid:
             print(f"  Computing FID for {exp_name}...")
             fid = compute_fid_from_loader(
                 model, data["fast_test_loader"], device,
@@ -575,6 +583,15 @@ def run_evaluation(data, cfg, device, backbone, use_attn_skip, use_gated_conv):
         )
 
         if exp_name == "C4_convnext_full" and cfg.eval.compute_fid:
+            fid = compute_fid_from_loader(
+                model, data["fast_test_loader"], device,
+                results_dir, exp_name, use_bf16=use_bf16,
+            )
+            fid_scores[exp_name]  = fid
+            phase4_eval[exp_name]["global"]["fid"] = fid
+
+        # Also compute FID for ConvNeXt base
+        if exp_name == "C0_convnext_base" and cfg.eval.compute_fid:
             fid = compute_fid_from_loader(
                 model, data["fast_test_loader"], device,
                 results_dir, exp_name, use_bf16=use_bf16,
@@ -651,7 +668,7 @@ def aggregate_multiseed(multi_results, cfg, device, data, backbone, use_attn_ski
     seeds     = [42, 1, 2]
 
     stats = {}
-    for exp_name in ["L0_base", "L4_full_method"]:
+    for exp_name in ["L0_base", "L4_full_method", "L3c_adaptive_spectral"]:
         all_metrics = {}
         ms_flag = (exp_name == "L4_full_method")
 
@@ -686,7 +703,62 @@ def aggregate_multiseed(multi_results, cfg, device, data, backbone, use_attn_ski
     return stats
 
 
-# ── Sensitivity Analysis ───────────────────────────────────────────────────────
+# ── Extension training helpers ────────────────────────────────────────────────
+
+_EXTEND_DEFAULT = "L0_base,L3_spectral_only,L3c_adaptive_spectral"
+
+
+def prepare_extension(
+    cfg,
+    extend_epochs: int,
+    lr_frac: float = 0.2,
+    extend_configs: str = _EXTEND_DEFAULT,
+):
+    """
+    Prepare cfg and delete _curves.json for target runs so load_or_train
+    treats them as incomplete and warm-starts from the existing _ema.pt.
+
+    LR strategy: cosine from lr_frac*peak → lr_min over extend_epochs.
+    Default lr_frac=0.2 gives peak=6e-5.  warmup_epochs=0 (already trained).
+    Also uses val_every_n_epochs=1 for tighter model selection.
+    """
+    cfg.speed.epochs_full        = extend_epochs
+    cfg.train.lr_peak            = cfg.train.lr_peak * lr_frac
+    cfg.train.warmup_epochs      = 0
+    cfg.train.patience           = max(cfg.train.patience, 5)
+    cfg.speed.val_every_n_epochs = 1    # tighter model selection during extension
+    cfg.speed.perc_every_n_steps = 2    # richer perceptual gradient signal
+    cfg.train.ema_decay          = 0.9999  # smoother EMA for extended run
+
+    ckpt_dir = Path(cfg.paths.checkpoints_dir)
+    res_dir  = Path(cfg.paths.results_dir)
+    target   = [c.strip() for c in extend_configs.split(",")]
+
+    print(f"\n{'='*60}")
+    print(f"EXTENSION MODE  (target epochs={extend_epochs}, lr_peak={cfg.train.lr_peak:.2e})")
+    print(f"  Configs : {', '.join(target)}")
+    print(f"  Strategy: warm-start from _ema.pt, cosine-anneal, val every epoch")
+    print(f"{'='*60}")
+
+    deleted = []
+    for exp_name in target:
+        run_name    = f"phase4_{exp_name}"
+        curves_path = res_dir  / f"{run_name}_curves.json"
+        ema_path    = ckpt_dir / f"{run_name}_ema.pt"
+        if ema_path.exists() and curves_path.exists():
+            curves_path.unlink()
+            deleted.append(run_name)
+            print(f"  Marked for extension: {run_name}")
+        elif not ema_path.exists():
+            print(f"  WARNING: {run_name}_ema.pt not found — skipping extension")
+
+    if not deleted:
+        print("  No runs marked for extension (checkpoints not found on this machine).")
+        print("  The warm-start will activate on Colab after restoring checkpoints.")
+    return deleted
+
+
+# ── Sensitivity Analysis ──────────────────────────────────────────────────────
 
 def run_sensitivity(data, cfg, device, backbone, use_attn_skip, use_gated_conv):
     print("\n" + "="*60)
@@ -724,6 +796,15 @@ def run_sensitivity(data, cfg, device, backbone, use_attn_skip, use_gated_conv):
 
 def main():
     parser = argparse.ArgumentParser(description="Boundary-Aware Inpainting Pipeline")
+    parser.add_argument("--extend_epochs",  type=int, default=0,
+                        help="Extend training of key configs to N total epochs (0=disabled). "
+                             "Uses warm-restart from _ema.pt with reduced LR.")
+    parser.add_argument("--extend_lr_frac",  type=float, default=0.2,
+                        help="LR multiplier for extension (default 0.2 = 20%% of original peak).")
+    parser.add_argument("--extend_configs",  type=str, default=_EXTEND_DEFAULT,
+                        help="Comma-separated list of phase4 config names to extend.")
+    parser.add_argument("--multiseed_l3c",   action="store_true",
+                        help="Include L3c_adaptive_spectral in multi-seed runs.")
     parser.add_argument("--skip_phases123", action="store_true",
                         help="Skip phases 1-3 (use resnet34+attn_skip+gated_conv). "
                              "Saves ~3h. Recommended when architecture is already decided.")
@@ -835,7 +916,14 @@ def main():
     print(f"    Skip type : {p2_winner}")
     print(f"    Conv type : {p3_winner}")
     print(f"    + Transformer bottleneck + Bilinear upsample + Boundary conditioning")
-
+    # ── Extension: modify cfg and mark runs for warm-restart ─────────────────
+    if args.extend_epochs > 0 and args.extend_epochs > cfg.speed.epochs_full:
+        prepare_extension(
+            cfg,
+            extend_epochs=args.extend_epochs,
+            lr_frac=args.extend_lr_frac,
+            extend_configs=args.extend_configs,
+        )
     # ── Phase 4: Loss ablation (fair equal-epoch) ─────────────────────────────
     if args.phase in (0, 4) and not args.eval_only:
         p4_results, p4_histories = run_phase4(
@@ -852,6 +940,7 @@ def main():
         multi_results = run_multiseed_l0l4(
             data, cfg, device, p1_winner, use_attn_skip, use_gated_conv,
             seeds=(42, 1, 2), state=state,
+            include_l3c=args.multiseed_l3c,
         )
     else:
         multi_results = {}
@@ -892,17 +981,37 @@ def main():
     plot_sensitivity(sensitivity, results_dir)
 
     try:
-        l0_path = Path(cfg.paths.checkpoints_dir) / "phase4_L0_base.pt"
-        l4_path = Path(cfg.paths.checkpoints_dir) / "phase4_L4_full_method.pt"
+        l0_path  = Path(cfg.paths.checkpoints_dir) / "phase4_L0_base.pt"
+        l3_path  = Path(cfg.paths.checkpoints_dir) / "phase4_L3_spectral_only.pt"
+        l3c_path = Path(cfg.paths.checkpoints_dir) / "phase4_L3c_adaptive_spectral.pt"
+        l4_path  = Path(cfg.paths.checkpoints_dir) / "phase4_L4_full_method.pt"
+
+        # Standard L0 vs L4 comparison
         if l0_path.exists() and l4_path.exists():
             mc0 = make_model_cfg(p1_winner, use_attn_skip, use_gated_conv, False)
             mc4 = make_model_cfg(p1_winner, use_attn_skip, use_gated_conv, True)
             m0  = BoundaryAwareInpainter(mc0).to(device)
             m4  = BoundaryAwareInpainter(mc4).to(device)
-            m0.load_state_dict(torch.load(l0_path, map_location=device, weights_only=True))
-            m4.load_state_dict(torch.load(l4_path, map_location=device, weights_only=True))
+            m0.load_state_dict(torch.load(l0_path,  map_location=device, weights_only=True))
+            m4.load_state_dict(torch.load(l4_path,  map_location=device, weights_only=True))
             plot_qualitative(m0, m4, data["fast_test_loader"], device, results_dir)
             del m0, m4
+            torch.cuda.empty_cache()
+
+        # Boundary-focused L0 vs L3 vs L3c comparison (key paper figure)
+        if l0_path.exists() and l3_path.exists() and l3c_path.exists():
+            mc  = make_model_cfg(p1_winner, use_attn_skip, use_gated_conv, False)
+            m0  = BoundaryAwareInpainter(mc).to(device)
+            m3  = BoundaryAwareInpainter(mc).to(device)
+            m3c = BoundaryAwareInpainter(mc).to(device)
+            m0.load_state_dict(torch.load(l0_path,  map_location=device, weights_only=True))
+            m3.load_state_dict(torch.load(l3_path,  map_location=device, weights_only=True))
+            m3c.load_state_dict(torch.load(l3c_path, map_location=device, weights_only=True))
+            plot_qualitative_boundary_compare(
+                {"L0 (Base)": m0, "L3 (Fixed Spectral)": m3, "L3c (ASBC)": m3c},
+                data["fast_test_loader"], device, results_dir,
+            )
+            del m0, m3, m3c
             torch.cuda.empty_cache()
     except Exception as e:
         print(f"  Qualitative plot warning: {e}")

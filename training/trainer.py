@@ -268,6 +268,7 @@ def run_experiment(
     device:                Optional[torch.device] = None,
     val_every_n_epochs:    int = 1,
     perc_every_n_steps:    int = 1,
+    initial_weights_path:  Optional[Path] = None,
 ) -> Dict:
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -352,6 +353,23 @@ def run_experiment(
         except Exception as e:
             print(f"  Warning: could not load resume checkpoint ({e}). Starting from scratch.")
             start_epoch = 0
+
+    # ── Warm-start from pre-trained weights (extension / fine-tune mode) ──────
+    # Used when extending training from a completed run (no _resume.pt, but
+    # caller supplies the path to the previous best / EMA checkpoint).
+    if start_epoch == 0 and initial_weights_path is not None:
+        _ip = Path(initial_weights_path)
+        if _ip.exists():
+            print(f"  Warm-start: loading initial weights from {_ip.name}")
+            _ws = torch.load(_ip, map_location=device, weights_only=True)
+            model.load_state_dict(_ws, strict=False)
+            if ema is not None:
+                ema.shadow = {k: v.clone().detach()
+                              for k, v in model.state_dict().items()}
+            print(f"  Warm-start ready.  lr_peak={cfg.train.lr_peak:.2e}  "
+                  f"warmup={cfg.train.warmup_epochs} epoch(s)")
+        else:
+            print(f"  Warm-start skipped: {_ip} not found.")
 
     # Correct encoder freeze state for current start_epoch
     set_encoder_frozen(start_epoch < freeze_encoder_epochs)
@@ -554,6 +572,18 @@ def load_or_train(
             else:
                 print(f"  Restarting {name} from scratch (no resume checkpoint).")
 
+    # Auto-detect warm-start: _ema.pt exists, _curves.json missing, no _resume.pt.
+    # This means a completed run whose epochs are being extended.
+    _resume_exists = (Path(cfg.paths.checkpoints_dir) / f"{name}_resume.pt").exists()
+    _auto_warm = (
+        ema_ckpt_path.exists()
+        and not curves_path.exists()
+        and not _resume_exists
+    )
+    if _auto_warm:
+        print(f"  Extension mode detected for '{name}': "
+              f"warm-starting from {ema_ckpt_path.name}")
+
     model  = model_factory()
     result = run_experiment(
         name=name,
@@ -568,6 +598,7 @@ def load_or_train(
         device=device,
         val_every_n_epochs=val_every_n_epochs,
         perc_every_n_steps=perc_every_n_steps,
+        initial_weights_path=ema_ckpt_path if _auto_warm else None,
     )
     result["model"] = model
     return result

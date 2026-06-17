@@ -20,11 +20,12 @@ from PIL import Image
 
 # Consistent color palette
 COLORS = {
-    "L0": "#e74c3c",
-    "L1": "#e67e22",
-    "L2": "#f1c40f",
-    "L3": "#27ae60",
-    "L4": "#2980b9",
+    "L0":  "#e74c3c",
+    "L1":  "#e67e22",
+    "L2":  "#f1c40f",
+    "L3":  "#27ae60",
+    "L3c": "#1abc9c",
+    "L4":  "#2980b9",
     "LaMa": "#8e44ad",
     "EdgeConnect": "#16a085",
 }
@@ -258,6 +259,102 @@ def plot_sensitivity(sensitivity_results: dict, results_dir: Path):
 
 
 # ── Qualitative Comparison Grid ────────────────────────────────────────────────
+
+def plot_qualitative_boundary_compare(
+    models: Dict[str, object],   # {label: model}, e.g. {"L0": m0, "L3": m3, "L3c": m3c}
+    test_loader,
+    device,
+    results_dir: Path,
+    n_show: int = 4,
+    use_amp: bool = True,
+    boundary_zoom: int = 4,
+):
+    """
+    Boundary-focused comparison: shows masked input, one column per model,
+    ground truth, then a 4x-zoomed boundary crop for each model.
+
+    Layout (per row):  masked | m0 | m1 | m2 | GT | zoom_m0 | zoom_m1 | zoom_m2
+    """
+    import torch
+
+    def _autocast(use_amp):
+        if use_amp and torch.cuda.is_available():
+            return torch.amp.autocast("cuda", dtype=torch.bfloat16)
+        return torch.amp.autocast("cpu", dtype=torch.float32, enabled=False)
+
+    for m in models.values():
+        m.eval()
+
+    images, masks, boundaries = next(iter(test_loader))
+    images     = images[:n_show].to(device)
+    masks      = masks[:n_show].to(device)
+    boundaries = boundaries[:n_show].to(device)
+    masked_in  = images * (1.0 - masks)
+
+    outputs = {}
+    with torch.no_grad(), _autocast(use_amp):
+        for label, model in models.items():
+            raw = model(masked_in, masks, boundaries)["output"].float()
+            outputs[label] = (images * (1.0 - masks) + raw * masks).cpu()
+
+    images_cpu = images.cpu()
+    masks_cpu  = masks.cpu()
+    masked_cpu = masked_in.cpu()
+
+    # Find boundary bounding box for crop
+    def _boundary_crop(img_t, boundary_t):
+        """Crop a square region around the boundary centroid."""
+        b = boundary_t.squeeze().numpy() > 0.5
+        if b.sum() == 0:
+            H, W = img_t.shape[-2:]
+            return img_t[..., H//4:3*H//4, W//4:3*W//4]
+        ys, xs = np.where(b)
+        cy, cx = int(ys.mean()), int(xs.mean())
+        H, W = img_t.shape[-2:]
+        half  = min(H, W) // 4
+        y0, y1 = max(0, cy - half), min(H, cy + half)
+        x0, x1 = max(0, cx - half), min(W, cx + half)
+        return img_t[..., y0:y1, x0:x1]
+
+    labels    = list(models.keys())
+    n_models  = len(labels)
+    # cols: masked | *model_cols | GT | *zoom_cols
+    n_cols = 1 + n_models + 1 + n_models
+    fig, axes = plt.subplots(n_show, n_cols, figsize=(n_cols * 3, n_show * 3 + 0.8))
+    if n_show == 1:
+        axes = axes[np.newaxis, :]
+
+    col_titles = ["Masked"] + labels + ["GT"] + [f"{l} (boundary ×{boundary_zoom})"
+                                                    for l in labels]
+    for ci, t in enumerate(col_titles):
+        axes[0, ci].set_title(t, fontsize=9)
+
+    for row in range(n_show):
+        def _show(ax, img_t, cmap=None):
+            arr = img_t.permute(1, 2, 0).numpy().clip(0, 1)
+            if img_t.shape[0] == 1:
+                ax.imshow(arr.squeeze(), cmap=cmap or "gray")
+            else:
+                ax.imshow(arr)
+            ax.axis("off")
+
+        ci = 0
+        _show(axes[row, ci], masked_cpu[row]);       ci += 1
+        for label in labels:
+            _show(axes[row, ci], outputs[label][row]); ci += 1
+        _show(axes[row, ci], images_cpu[row]);       ci += 1  # GT
+        for label in labels:
+            crop = _boundary_crop(outputs[label][row], masks_cpu[row])
+            gt_c = _boundary_crop(images_cpu[row],     masks_cpu[row])
+            # Side-by-side crop vs GT in the same cell using a mini-grid effect
+            # For simplicity, show the model crop enlarged
+            _show(axes[row, ci], crop);               ci += 1
+
+    fig.suptitle("Boundary coherence: L0 vs L3 (fixed spectral) vs L3c (ASBC)",
+                 fontsize=12, fontweight="bold")
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+    save_fig(fig, results_dir / "qualitative_boundary_compare.png")
+
 
 def plot_qualitative(
     model_l0,

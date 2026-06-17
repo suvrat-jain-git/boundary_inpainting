@@ -63,7 +63,11 @@ def run_pipeline(cfg, skip_download: bool = False,
                   skip_phases123: bool = True,
                   skip_multiseed: bool = False,
                   skip_convnext:  bool = False,
-                  eval_only:      bool = False):
+                  eval_only:      bool = False,
+                  extend_epochs:  int  = 0,
+                  extend_lr_frac: float = 0.2,
+                  extend_configs: str  = "L0_base,L3_spectral_only,L3c_adaptive_spectral",
+                  multiseed_l3c:  bool = False):
     import gc
     import random
 
@@ -78,7 +82,9 @@ def run_pipeline(cfg, skip_download: bool = False,
     )
     from main import (
         PHASE4_CONFIGS, PipelineState,
+        _EXTEND_DEFAULT,
         aggregate_multiseed, make_model_cfg,
+        prepare_extension,
         run_convnext_runs, run_evaluation,
         run_multiseed_l0l4, run_phase1, run_phase2,
         run_phase3, run_phase4, run_sensitivity,
@@ -143,7 +149,14 @@ def run_pipeline(cfg, skip_download: bool = False,
         use_attn_skip  = True
         use_gated_conv = True
         log("\n[Phases 1-3 skipped] Using: resnet34 + attn_skip + gated_conv")
-
+    # ── Extension: warm-restart from existing checkpoints ──────────────────
+    if extend_epochs > 0 and extend_epochs > cfg.speed.epochs_full:
+        prepare_extension(
+            cfg,
+            extend_epochs=extend_epochs,
+            lr_frac=extend_lr_frac,
+            extend_configs=extend_configs,
+        )
     # ── Phase 4: Loss ablation (all configs, equal epochs) ────────────────────
     if not eval_only:
         log("\n[Phase 4] Loss ablation (6 configs × epochs_full={})".format(cfg.speed.epochs_full))
@@ -161,10 +174,11 @@ def run_pipeline(cfg, skip_download: bool = False,
 
     # ── Multi-seed runs (L0 + L4, seeds 42/1/2) ───────────────────────────────
     if not skip_multiseed and not eval_only:
-        log("\n[Multi-seed] L0 + L4 with seeds [42, 1, 2]")
+        log("\n[Multi-seed] L0 + L4 + (optionally L3c) with seeds [42, 1, 2]")
         multi_results = run_multiseed_l0l4(
             data, cfg, device, p1_winner, use_attn_skip, use_gated_conv,
             seeds=(42, 1, 2), state=state,
+            include_l3c=multiseed_l3c,
         )
     else:
         multi_results = {}
@@ -251,6 +265,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--profile",       type=str, default="production",
                         choices=["default", "production", "smoke"])
+    parser.add_argument("--extend_epochs",  type=int, default=0,
+                        help="Extend training to N total epochs via warm-restart (0=disabled).")
+    parser.add_argument("--extend_lr_frac",  type=float, default=0.2,
+                        help="LR multiplier for extension (default 0.2).")
+    parser.add_argument("--extend_configs",  type=str,
+                        default="L0_base,L3_spectral_only,L3c_adaptive_spectral",
+                        help="Comma-separated phase4 config names to extend.")
+    parser.add_argument("--multiseed_l3c",   action="store_true",
+                        help="Include L3c in multi-seed runs (2 extra training runs).")
     parser.add_argument("--skip_download",  action="store_true",
                         help="Skip dataset download check")
     parser.add_argument("--skip_phases123", action="store_true", default=True,
@@ -289,11 +312,15 @@ if __name__ == "__main__":
     try:
         run_pipeline(
             cfg,
-            skip_download=args.skip_download,
-            skip_phases123=args.skip_phases123 and not args.run_phases123,
-            skip_multiseed=args.skip_multiseed,
-            skip_convnext=args.skip_convnext,
-            eval_only=args.eval_only,
+            skip_download  = args.skip_download,
+            skip_phases123 = args.skip_phases123 and not args.run_phases123,
+            skip_multiseed = args.skip_multiseed,
+            skip_convnext  = args.skip_convnext,
+            eval_only      = args.eval_only,
+            extend_epochs  = args.extend_epochs,
+            extend_lr_frac = args.extend_lr_frac,
+            extend_configs = args.extend_configs,
+            multiseed_l3c  = args.multiseed_l3c,
         )
     except KeyboardInterrupt:
         log("\nInterrupted — pipeline state saved. Re-run to resume.")
