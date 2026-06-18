@@ -21,11 +21,12 @@
 \newcommand{\Ltv}{\mathcal{L}_{\mathrm{tv}}}
 \newcommand{\LASBC}{\mathcal{L}_{\mathrm{ASBC}}}
 \newcommand{\Ltotal}{\mathcal{L}_{\mathrm{total}}}
+\newcommand{\Lbase}{\mathcal{L}_{\mathrm{base}}}
 
 \begin{document}
 
 % ── Title & Authors ────────────────────────────────────────────────────────────
-\title{Boundary-Aware Image Inpainting via Adaptive Spectral Boundary Coherence Loss}
+\title{Boundary-Localised Spectral Supervision for Image Inpainting: Fixed vs. Adaptive Band Weighting}
 
 \author{
   \IEEEauthorblockN{Anonymous Authors}
@@ -56,10 +57,10 @@ baseline), whereas our adaptive ASBC loss recovers this degradation:
 ASBC achieves \textbf{+0.38 dB PSNR} and \textbf{6.8\% lower boundary MAE}
 over the fixed-weight spectral baseline (L3$\to$L3c), and improves FID by
 \textbf{3.54 points} (60.41$\to$56.86) over fixed spectral supervision.
-Three-seed evaluation shows ASBC is statistically near-parity with the
-reconstruction baseline while providing improved boundary metrics.
-Zero-shot evaluation on
-CelebA-HQ and DTD confirms cross-domain consistency.
+Three-seed evaluation shows ASBC remains close to the reconstruction
+baseline while consistently improving over fixed spectral supervision.
+Zero-shot evaluation on CelebA-HQ and DTD shows that ASBC remains close
+to baseline, while the L4 combined stack degrades under domain shift.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -104,19 +105,18 @@ We make three contributions:
   scaffold (mask-injected skip gates, boundary-conditioning FiLM, optional Transformer
   bottleneck, auxiliary heads) to isolate boundary-loss effects under controlled settings.
 
-  \item We provide an \textbf{targeted ablation study} across six loss
+  \item We provide a \textbf{targeted ablation study} across six loss
   configurations, two backbone architectures (ResNet-34 and ConvNeXt-Tiny),
-  and three visual domains, demonstrating three practical findings:
-  (i) fixed-weight spectral supervision degrades reconstruction quality,
-  (ii) ASBC mitigates this degradation and improves boundary/perceptual trade-offs,
-  and (iii) simple boundary losses provide reliable seam-quality gains without
-  reconstruction cost.
+  and three visual domains, showing that fixed spectral boundary supervision can
+  degrade reconstruction quality, while ASBC recovers much of this degradation
+  and serves as a safer adaptive alternative to fixed spectral weighting.
 \end{enumerate}
 
 The remainder of this paper is structured as follows.
 Section~\ref{sec:related} reviews related work.
 Section~\ref{sec:method} describes our architecture and loss formulation.
 Section~\ref{sec:experiments} presents experimental results.
+Section~\ref{sec:discussion} discusses observed trade-offs.
 Section~\ref{sec:conclusion} concludes.
 
 % ─────────────────────────────────────────────────────────────────────────────
@@ -265,11 +265,22 @@ batched \texttt{torch.fft.fft2} call.  The ASBC loss is:
   \label{eq:asbc}
 \end{equation}
 
-\subsubsection{Total Loss}
+\subsubsection{Configuration-Specific Total Losses}
+The shared base objective is:
 \begin{equation}
-  \Ltotal = 6\Lhole + \Lvalid + 0.1\Lperc + 3\Lbound + \LASBC + 0.01\Ltv.
-  \label{eq:ltotal}
+  \Lbase = 6\Lhole + \Lvalid + 0.1\Lperc.
+  \label{eq:lbase}
 \end{equation}
+
+The ablation configurations are implemented as:
+\begin{align}
+  \Ltotal^{\mathrm{L1}}  &= \Lbase + 3\Lbound, \label{eq:ltotal_l1}\\
+  \Ltotal^{\mathrm{L2}}  &= \Lbase + 3\Lbound^{\mathrm{gw}}, \label{eq:ltotal_l2}\\
+  \Ltotal^{\mathrm{L3}}  &= \Lbase + \Lspec, \label{eq:ltotal_l3}\\
+  \Ltotal^{\mathrm{L3c}} &= \Lbase + \LASBC. \label{eq:ltotal_l3c}
+\end{align}
+The L4 combined stack further adds fixed spectral, TV, and multi-scale
+boundary terms on top of the gradient-weighted boundary variant.
 
 \textbf{Implementation Specifics.}
 Boundary map $B$ is computed as a symmetric seam band using morphological
@@ -301,7 +312,7 @@ across patches and images.
     boundary-conditioning FiLM (BCM)
     $\rightarrow$ \textbf{Output} $\hat{I}$ \\
     \vspace{2mm}
-    \textbf{Auxiliary 1/8, 1/4 heads} used only in full configuration (L4)
+    \textbf{Auxiliary 1/8, 1/4 heads} used only in the L4 combined stack
   \end{minipage}}
   \caption{Architecture schematic used for ASBC evaluation. The model is
     boundary-aware through MISG and BCM; Transformer bottleneck and auxiliary
@@ -314,10 +325,12 @@ across patches and images.
 \label{sec:experiments}
 
 \subsection{Datasets and Evaluation Protocol}
-\textbf{Training:}
-We train on Places365 validation split ($256{\times}256$,
-36,500 images)~\cite{zhou2017places} with randomly generated irregular
-masks~\cite{liu2018partial} covering 10–60\% of the image area.
+\textbf{Training and split protocol:}
+We use the 36.5k Places365 validation images~\cite{zhou2017places} as a
+budget-constrained corpus and split them into disjoint subsets:
+25,550 train, 5,475 validation, and 5,475 test images. All reported
+Places365 numbers are from the held-out 5,475-image test subset. Masks are
+random irregular masks~\cite{liu2018partial} covering 10–60\% of image area.
 
 \textbf{Evaluation:}
 We report Peak Signal-to-Noise Ratio (PSNR, dB), Structural Similarity
@@ -358,8 +371,8 @@ L1: L0 + uniform boundary loss;
 L2: L0 + gradient-weighted boundary loss;
 L3: L0 + fixed spectral boundary coherence;
 L3c: L0 + adaptive spectral boundary coherence (ASBC);
-L4: L0 + gradient boundary + fixed spectral + TV + multi-scale boundary heads
-(mixed loss+architecture setting).
+L4: L0 + gradient-weighted boundary + fixed spectral + multi-scale boundary heads
+(combined loss stack setting).
 
 \begin{table*}[t]
   \centering
@@ -381,48 +394,37 @@ L4: L0 + gradient boundary + fixed spectral + TV + multi-scale boundary heads
        & \textbf{20.42} & 0.7139 & 0.3539 & 0.0311 & 0.9835 & 54.91 \\
     L1 & L0 + boundary loss (uniform)
        & \textbf{20.42} & 0.7144 & \textbf{0.3522} & \textbf{0.0305} & \textbf{0.9836} & 55.04 \\
-    L2 & L1 + gradient-weighted boundary
+    L2 & L0 + gradient-weighted boundary
        & \textbf{20.42} & \textbf{0.7145} & 0.3524 & 0.0309 & \textbf{0.9836} & \textbf{54.85} \\
-    L3 & L2 + fixed uniform spectral loss
+    L3 & L0 + fixed spectral boundary coherence
        & 20.00 & 0.6999 & 0.3767 & 0.0353 & 0.9815 & 60.41 \\
-     L3c & L0 + ASBC (ours, learned spectral boundary)
+     L3c & L0 + ASBC (adaptive spectral boundary)
        & 20.38 & 0.7095 & 0.3584 & 0.0329 & 0.9829 & 56.86 \\
-     L4 & mixed full stack (grad-boundary + fixed spectral + MS heads)
+     L4 & combined stack (grad-boundary + fixed spectral + MS heads)
        & 20.06 & 0.7018 & 0.3739 & 0.0345 & 0.9819 & 60.04 \\
     \bottomrule
   \end{tabular}
 \end{table*}
 
 The ablation reveals several important patterns.
-L0, L1, and L2 achieve essentially identical PSNR (20.42 dB) and SSIM (0.713--0.714), confirming that
-boundary supervision does not harm reconstruction quality; L1 achieves the best B-MAE (0.0305) and LPIPS (0.3522), showing that uniform boundary weighting alone delivers measurable seam improvement.
-Introducing fixed uniform spectral supervision (L3) substantially \emph{degrades} performance:
-$-0.42$ dB PSNR, $-0.014$ SSIM, and $+0.014$ B-MAE versus L0.
-This confirms that naive spectral penalties conflict with spatial reconstruction when all
-bands are weighted equally.  \textbf{ASBC (L3c) reverses this degradation:}
-versus L3, it recovers $+0.38$ dB PSNR, reduces B-MAE by 6.8\% (0.0353$\to$0.0329), and
-improves FID by 3.54 points (60.41$\to$56.86), achieving the best FID among spectral configurations, demonstrating that
-learned per-band weights successfully adapt the spectral signal to scene content.
-The mixed full-stack setting L4 improves over L3 in PSNR and B-MAE, but remains below
-L0/L1/L2 and L3c, suggesting non-trivial interaction between loss terms and auxiliary
-architectural supervision under the current training budget.
-
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=0.95\linewidth]{figs/training_curves.png}
-  \caption{Training/validation dynamics across ablation configurations.
-    Curves show that fixed spectral supervision (L3) converges to a worse basin,
-    while ASBC (L3c) tracks a better boundary/reconstruction trade-off.}
-  \label{fig:training_dynamics}
-\end{figure}
+L0, L1, and L2 achieve identical PSNR (20.42 dB) while L1/L2 provide the
+strongest practical operating points (best B-MAE for L1; best SSIM/FID for L2).
+Introducing fixed spectral supervision (L3) substantially \emph{degrades}
+reconstruction ($-0.42$ dB PSNR, $-0.014$ SSIM, $+0.0142$ B-MAE vs. L0).
+\textbf{ASBC (L3c) should therefore be read as a recovery over fixed spectral, not
+as an improvement over the reconstruction baseline:} versus L3, it recovers
+$+0.38$ dB PSNR, reduces B-MAE by 6.8\% (0.0353$\to$0.0329), and improves FID by
+3.54 points (60.41$\to$56.86), but remains slightly below L0/L1/L2.
+The L4 combined stack also underperforms L0/L1/L2 and should be interpreted as
+a negative control: combining boundary, spectral, and auxiliary supervision
+does not automatically improve results under a short training budget.
 
 \subsection{Multi-Seed Reproducibility}
 \label{sec:multiseed}
 
 Table~\ref{tab:seeds} reports mean and standard deviation over three random
-seeds (42, 1, 2) for baseline (L0), ASBC (L3c), and full method (L4).
-The low variance confirms that observed gains are statistically reliable and
-not seed-dependent.
+seeds (42, 1, 2) for baseline (L0), ASBC (L3c), and the L4 combined stack.
+The low variance indicates the trends are stable across three seeds.
 
 \begin{table}[t]
   \centering
@@ -435,7 +437,7 @@ not seed-dependent.
     \midrule
     L0 (base)    & $20.385 \pm 0.004$ & $0.0305 \pm 0.0000$ & $0.9838 \pm 0.000013$ \\
     L3c (ASBC)   & $20.377 \pm 0.033$ & $0.0304 \pm 0.0001$ & $0.9838 \pm 0.000065$ \\
-    L4 (ours)    & $20.004 \pm 0.030$ & $0.0341 \pm 0.0001$ & $0.9818 \pm 0.000043$ \\
+    L4 (combined stack) & $20.004 \pm 0.030$ & $0.0341 \pm 0.0001$ & $0.9818 \pm 0.000043$ \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -444,13 +446,11 @@ not seed-dependent.
 \label{sec:crossdomain}
 
 Table~\ref{tab:crossdomain} reports zero-shot performance on CelebA-HQ and
-DTD.  The reconstruction baseline L0 generalizes robustly to both domains,
-outperforming all spectral-supervised variants on PSNR and B-MAE.
-L3c (ASBC) closely tracks L0 on CelebA-HQ ($-0.07$ dB PSNR, $+0.0002$ B-MAE),
-confirming that learned spectral weights do not introduce domain-specific
-overfitting.  The full method L4 shows larger cross-domain degradation
-($-0.48$ dB on CelebA-HQ, $-0.39$ dB on DTD vs.\ L0), suggesting that the
-combined loss weighting requires further tuning for zero-shot settings.
+DTD. L0 is best on both datasets. L3c remains close to L0
+($-0.07$ dB on CelebA-HQ, $-0.09$ dB on DTD), suggesting no collapse under
+domain shift but not an improvement over baseline. The L4 combined stack
+shows larger degradation ($-0.48$ dB on CelebA-HQ, $-0.39$ dB on DTD vs. L0),
+indicating that stacked losses are less robust zero-shot in the current setup.
 
 \begin{table}[t]
   \centering
@@ -473,18 +473,18 @@ combined loss weighting requires further tuning for zero-shot settings.
 \subsection{Backbone Architecture Study}
 \label{sec:backbone}
 
-To verify that trends are backbone-agnostic, we re-run L0 and L4 with a
+To probe architectural interaction, we re-run L0 and L4 with a
 ConvNeXt-Tiny~\cite{liu2022convnet} encoder (seed 42).
 Table~\ref{tab:backbone} shows that ConvNeXt-Tiny consistently outperforms
 ResNet-34 in the base configuration (C0: $+0.08$ dB PSNR, B-MAE $0.0287$ vs.\ $0.0311$),
 demonstrating that architectural capacity provides complementary gains to loss design.
-Both backbones exhibit the same pattern: adding the full L4 loss decreases PSNR
+Both backbones exhibit the same pattern: adding the L4 combined stack decreases PSNR
 relative to the base.
 ConvNeXt-Tiny base (C0) also yields the best overall FID (52.45), while C4 degrades to 58.90,
 indicating that architecture improvements and loss-stack complexity interact non-trivially.
-These results confirm that the ASBC loss generalises across backbone architectures,
-and that the loss-weight interaction (not the feature hierarchy) drives the
-observed performance trade-offs.
+Because this table does not evaluate L3c, it does not establish backbone-agnostic
+ASBC gains; it only shows that ConvNeXt improves the base model and that the L4
+combined stack degrades both backbones.
 
 \begin{table}[t]
   \centering
@@ -503,20 +503,6 @@ observed performance trade-offs.
     \bottomrule
   \end{tabular}
 \end{table}
-
-\subsection{Quantitative Summary Visualization}
-Fig.~\ref{fig:ablation_vis} provides a compact visual summary of the ablation
-metrics, complementing Table~\ref{tab:ablation}. It highlights the same trend:
-L1/L2 are strongest for seam error under fixed training budget, L3 degrades,
-and L3c recovers much of that degradation.
-
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=0.95\linewidth]{figs/ablation_table.png}
-  \caption{Visual summary of ablation metrics exported from the evaluation
-    pipeline.}
-  \label{fig:ablation_vis}
-\end{figure}
 
 \subsection{Sensitivity Analysis}
 Fig.~\ref{fig:sensitivity} shows the effect of varying three ASBC
@@ -557,7 +543,7 @@ while our budget was 12 epochs on the 36.5k validation split.  The comparison
 is therefore included for context only.  Our primary contribution is not raw
 reconstruction performance but the \emph{relative} benefit of learned
 spectral boundary supervision over fixed alternatives (Table~\ref{tab:ablation}),
-and the introduced B-MAE metric for seam quality assessment.
+and boundary-focused B-MAE reporting for seam quality assessment.
 
 \begin{table}[t]
   \centering
@@ -592,21 +578,22 @@ Fixed uniform spectral supervision (L3) penalises all frequency bands equally,
 but boundary artefacts are not uniformly distributed across the spectrum.
 Forcing the network to minimise equal contributions from all bands introduces
 conflicting gradients that degrade spatial reconstruction (Table~\ref{tab:ablation},
-L3 vs.\ L0: $-0.42$ dB).  ASBC (L3c) learns which bands matter most for a given
-training set, allowing the spectral term to act selectively and recovering the
+L3 vs.\ L0: $-0.42$ dB).  ASBC (L3c) allows the spectral term to be weighted
+adaptively rather than uniformly, recovering the
 lost PSNR while still reducing B-MAE and FID relative to L3.
 
 \textbf{Trade-off summary.}
 Our results indicate a three-way trade-off rather than a single dominant point:
 L2 achieves the best overall FID/SSIM under the current 12-epoch budget,
-L1 gives the best B-MAE, and L3c provides the strongest adaptive-spectral
-alternative by substantially improving over L3 while remaining close to L0.
+L1 gives the best B-MAE, L2 gives the best SSIM/FID, and L3c provides the
+strongest adaptive-spectral alternative by substantially improving over L3
+while remaining close to L0.
 This motivates reporting multiple operating points instead of a single "best"
 model claim.
 
 \textbf{Why L4 does not uniformly improve on L0.}
-The full loss stack (L4) combines boundary, gradient-weighted boundary, and
-ASBC terms with fixed scalar weights (Eq.~\ref{eq:ltotal}).  With only 12
+The L4 combined stack uses gradient-weighted boundary and fixed spectral terms
+with auxiliary supervision. With only 12
 training epochs, the network may not fully resolve the competing objectives.
 Longer training or learned loss weighting (e.g., uncertainty-based
 multi-task learning) are likely to close the remaining gap to L0.
@@ -624,27 +611,31 @@ confirming reproducibility.  Extension to video inpainting, where temporal
 boundary coherence is an additional concern, and to higher resolutions remain
 future work.  The combination of all loss terms (L4) requires further
 hyperparameter tuning to reliably outperform simpler configurations.
+We did not retain the final learned ASBC band weights in the exported artifact
+bundle; future releases should log these values explicitly for interpretability.
+The current manuscript also lacks a qualitative seam-comparison panel, which
+should be added from saved per-image predictions in the next artifact release.
 
 % ─────────────────────────────────────────────────────────────────────────────
 \section{Conclusion}
 \label{sec:conclusion}
 
-We presented Adaptive Spectral Boundary Coherence (ASBC) loss, a novel
+We presented Adaptive Spectral Boundary Coherence (ASBC) loss, a
 supervision signal for image inpainting that decomposes boundary-localised
 FFT patches into radial frequency bands and learns per-band importance weights
 end-to-end.  Our ablation over six loss configurations on Places365 demonstrates
 the core finding: fixed-weight spectral supervision degrades reconstruction
 quality ($-0.42$ dB PSNR vs.\ the baseline), whereas ASBC recovers this
 degradation, achieving $+0.38$ dB PSNR and $6.8\%$ lower B-MAE compared to
-the fixed spectral baseline.  Simple boundary losses (L1, L2) provide the best
-standalone B-MAE with no PSNR cost, while ASBC (L3c) achieves the best FID
-(56.86) among spectral configurations and near-parity with baseline in three-seed statistics.
+the fixed spectral baseline.  Simple boundary losses (L1, L2) provide the
+strongest low-budget operating points (best B-MAE for L1, best SSIM/FID for L2),
+while ASBC (L3c) provides a safer adaptive replacement for fixed spectral supervision.
 ConvNeXt-Tiny backbone
 consistently outperforms ResNet-34 in the base configuration, confirming
-that architecture and loss design provide complementary improvements.
+that architecture and loss design interact strongly.
 Low multi-seed variance ($<0.04$ dB) confirms reproducibility.
 Overall, adaptive frequency weighting addresses a practical limitation of fixed
-spectral seam supervision, while the full loss-stack results indicate that
+spectral seam supervision, while the L4 combined-stack results indicate that
 loss-term interaction remains an open optimisation problem.
 These findings motivate future work on dynamic loss balancing and longer
 training schedules under larger-scale data budgets.
