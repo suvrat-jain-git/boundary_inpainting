@@ -62,8 +62,11 @@ loss configurations on Places365 shows that naive fixed-weight spectral
 supervision degrades overall quality ($-0.42$ dB PSNR vs.\ the reconstruction
 baseline), whereas our adaptive ASBC loss recovers this degradation:
 ASBC achieves \textbf{+0.38 dB PSNR} and \textbf{6.8\% lower boundary MAE}
-over the fixed-weight spectral baseline (L3$\to$L3c), with the best FID
-(56.86) among all spectral configurations.  Zero-shot evaluation on
+over the fixed-weight spectral baseline (L3$\to$L3c), and improves FID by
+\textbf{3.54 points} (60.41$\to$56.86) over fixed spectral supervision.
+Three-seed evaluation shows ASBC is statistically near-parity with the
+reconstruction baseline while providing improved boundary metrics.
+Zero-shot evaluation on
 CelebA-HQ and DTD confirms cross-domain consistency.
 \end{abstract}
 
@@ -113,9 +116,11 @@ We make three contributions:
 
   \item We provide an \textbf{extensive ablation study} across six loss
   configurations, two backbone architectures (ResNet-34 and ConvNeXt-Tiny),
-  and three visual domains, demonstrating that ASBC consistently outperforms
-  fixed-weight spectral supervision and that simple boundary losses provide
-  reliable seam-quality gains without reconstruction cost.
+  and three visual domains, demonstrating three practical findings:
+  (i) fixed-weight spectral supervision degrades reconstruction quality,
+  (ii) ASBC mitigates this degradation and improves boundary/perceptual trade-offs,
+  and (iii) simple boundary losses provide reliable seam-quality gains without
+  reconstruction cost.
 \end{enumerate}
 
 The remainder of this paper is structured as follows.
@@ -291,7 +296,7 @@ masks~\cite{liu2018partial} covering 10–60\% of the image area.
 We report Peak Signal-to-Noise Ratio (PSNR, dB), Structural Similarity
 (SSIM), Learned Perceptual Image Patch Similarity (LPIPS$\downarrow$),
 boundary mean absolute error (B-MAE$\downarrow$), spectral coherence
-(S-Coh$\downarrow$, the fixed-weight spectral loss value at test time), and
+(S-Coh$\uparrow$, normalized FFT-spectrum cross-correlation at test time), and
 Fréchet Inception Distance (FID$\downarrow$)~\cite{heusel2017gans}.
 
 \textbf{Zero-shot cross-domain:}
@@ -316,7 +321,7 @@ total compute: $\sim$29 hours including all ablation variants.
 \label{sec:ablation}
 
 Table~\ref{tab:ablation} presents the ablation over six loss configurations
-on Places365, all trained with identical hyperparameters and 50 epochs to
+on Places365, all trained with identical hyperparameters and 12 epochs to
 ensure fair comparison.  Each configuration adds or modifies one component
 over the preceding row.
 
@@ -326,7 +331,7 @@ over the preceding row.
     12 epochs on the same data splits. B-MAE = boundary mean absolute error;
     S-Coh = spectral coherence (normalised cross-correlation; $\uparrow$).
     $\uparrow$ higher is better, $\downarrow$ lower is better. Best per-column
-    values \textbf{bold}. FID computed only for configs with spectral loss.}
+    values \textbf{bold}.}
   \label{tab:ablation}
   \setlength{\tabcolsep}{6pt}
   \begin{tabular}{clcccccc}
@@ -337,15 +342,15 @@ over the preceding row.
       & \textbf{S-Coh}$\uparrow$ & \textbf{FID}$\downarrow$ \\
     \midrule
     L0 & Base ($\Lhole + \Lvalid + \Lperc + \Ltv$)
-       & \textbf{20.42} & 0.7139 & 0.3539 & 0.0311 & 0.9835 & --- \\
+       & \textbf{20.42} & 0.7139 & 0.3539 & 0.0311 & 0.9835 & 54.91 \\
     L1 & L0 + boundary loss (uniform)
-       & \textbf{20.42} & 0.7144 & \textbf{0.3522} & \textbf{0.0305} & \textbf{0.9836} & --- \\
+       & \textbf{20.42} & 0.7144 & \textbf{0.3522} & \textbf{0.0305} & \textbf{0.9836} & 55.04 \\
     L2 & L1 + gradient-weighted boundary
-       & \textbf{20.42} & \textbf{0.7145} & 0.3524 & 0.0309 & \textbf{0.9836} & --- \\
+       & \textbf{20.42} & \textbf{0.7145} & 0.3524 & 0.0309 & \textbf{0.9836} & \textbf{54.85} \\
     L3 & L2 + fixed uniform spectral loss
-       & 20.00 & 0.6999 & 0.3767 & 0.0353 & 0.9815 & --- \\
+       & 20.00 & 0.6999 & 0.3767 & 0.0353 & 0.9815 & 60.41 \\
     L3c & L2 + ASBC (ours, learned weights)
-       & 20.38 & 0.7095 & 0.3584 & 0.0329 & 0.9829 & \textbf{56.86} \\
+       & 20.38 & 0.7095 & 0.3584 & 0.0329 & 0.9829 & 56.86 \\
     L4 & L3c + boundary loss stack (ours)
        & 20.06 & 0.7018 & 0.3739 & 0.0345 & 0.9819 & 60.04 \\
     \bottomrule
@@ -360,7 +365,7 @@ $-0.42$ dB PSNR, $-0.014$ SSIM, and $+0.014$ B-MAE versus L0.
 This confirms that naive spectral penalties conflict with spatial reconstruction when all
 bands are weighted equally.  \textbf{ASBC (L3c) reverses this degradation:}
 versus L3, it recovers $+0.38$ dB PSNR, reduces B-MAE by 6.8\% (0.0353$\to$0.0329), and
-achieves the best FID (56.86) among all spectral configurations, demonstrating that
+improves FID by 3.54 points (60.41$\to$56.86), achieving the best FID among spectral configurations, demonstrating that
 learned per-band weights successfully adapt the spectral signal to scene content.
 The full loss stack L4 also improves substantially over L3 but sits between L3 and
 L0 in PSNR (20.06 dB), suggesting that further loss-weight tuning or additional training
@@ -386,7 +391,7 @@ This non-degeneracy is enforced by the entropy regulariser (Section~\ref{sec:asb
 \label{sec:multiseed}
 
 Table~\ref{tab:seeds} reports mean and standard deviation over three random
-seeds (42, 1, 2) for the baseline (L0) and full method (L4).
+seeds (42, 1, 2) for baseline (L0), ASBC (L3c), and full method (L4).
 The low variance confirms that observed gains are statistically reliable and
 not seed-dependent.
 
@@ -400,6 +405,7 @@ not seed-dependent.
     & \textbf{PSNR} & \textbf{B-MAE} & \textbf{S-Coh} \\
     \midrule
     L0 (base)    & $20.385 \pm 0.004$ & $0.0305 \pm 0.0000$ & $0.9838 \pm 0.000013$ \\
+    L3c (ASBC)   & $20.377 \pm 0.033$ & $0.0304 \pm 0.0001$ & $0.9838 \pm 0.000065$ \\
     L4 (ours)    & $20.004 \pm 0.030$ & $0.0341 \pm 0.0001$ & $0.9818 \pm 0.000043$ \\
     \bottomrule
   \end{tabular}
@@ -444,8 +450,9 @@ Table~\ref{tab:backbone} shows that ConvNeXt-Tiny consistently outperforms
 ResNet-34 in the base configuration (C0: $+0.08$ dB PSNR, B-MAE $0.0287$ vs.\ $0.0311$),
 demonstrating that architectural capacity provides complementary gains to loss design.
 Both backbones exhibit the same pattern: adding the full L4 loss decreases PSNR
-relative to the base, with ConvNeXt-Tiny C4 achieving the lowest FID (58.90)
-among evaluated ConvNeXt configurations.
+relative to the base.
+ConvNeXt-Tiny base (C0) also yields the best overall FID (52.45), while C4 degrades to 58.90,
+indicating that architecture improvements and loss-stack complexity interact non-trivially.
 These results confirm that the ASBC loss generalises across backbone architectures,
 and that the loss-weight interaction (not the feature hierarchy) drives the
 observed performance trade-offs.
@@ -460,10 +467,10 @@ observed performance trade-offs.
     \textbf{Backbone} & \textbf{Config}
       & \textbf{PSNR} & \textbf{B-MAE} & \textbf{FID} \\
     \midrule
-    ResNet-34    & L0  & 20.42 & 0.0311 & --- \\
+    ResNet-34    & L0  & 20.42 & 0.0311 & 54.91 \\
     ResNet-34    & L4  & 20.06 & 0.0345 & 60.04 \\
-    ConvNeXt-Tiny & L0 & \textbf{20.50} & \textbf{0.0287} & --- \\
-    ConvNeXt-Tiny & L4 & 19.97 & 0.0338 & \textbf{58.90} \\
+    ConvNeXt-Tiny & L0 & \textbf{20.50} & \textbf{0.0287} & \textbf{52.45} \\
+    ConvNeXt-Tiny & L4 & 19.97 & 0.0338 & 58.90 \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -544,7 +551,7 @@ and the introduced B-MAE metric for seam quality assessment.
     MISF~\cite{li2022misf}                & 28.64 & 0.888 & 0.148 & 31.8 \\
     LaMa~\cite{suvorov2022resolution}     & 29.87 & 0.901 & 0.134 & 24.6 \\
     \midrule
-    Ours L0 (ResNet-34, 12ep)$^\dagger$   & 20.42 & 0.714 & 0.354 & --- \\
+    Ours L0 (ResNet-34, 12ep)$^\dagger$   & 20.42 & 0.714 & 0.354 & 54.9 \\
     Ours L3c (ResNet-34, 12ep)$^\dagger$  & 20.38 & 0.710 & 0.358 & 56.9 \\
     \bottomrule
   \end{tabular}
@@ -562,7 +569,15 @@ Forcing the network to minimise equal contributions from all bands introduces
 conflicting gradients that degrade spatial reconstruction (Table~\ref{tab:ablation},
 L3 vs.\ L0: $-0.42$ dB).  ASBC (L3c) learns which bands matter most for a given
 training set, allowing the spectral term to act selectively and recovering the
-lost PSNR while still reducing B-MAE relative to L3.
+lost PSNR while still reducing B-MAE and FID relative to L3.
+
+\textbf{Trade-off summary.}
+Our results indicate a three-way trade-off rather than a single dominant point:
+L2 achieves the best overall FID/SSIM under the current 12-epoch budget,
+L1 gives the best B-MAE, and L3c provides the strongest adaptive-spectral
+alternative by substantially improving over L3 while remaining close to L0.
+This motivates reporting multiple operating points instead of a single "best"
+model claim.
 
 \textbf{Why L4 does not uniformly improve on L0.}
 The full loss stack (L4) combines boundary, gradient-weighted boundary, and
@@ -579,7 +594,7 @@ less than 3\% compared to L3 on an A100.
 
 \textbf{Limitations.}
 Our evaluation is limited to $256{\times}256$ resolution due to training budget.
-The multi-seed variance is very low (PSNR std $< 0.03$ dB for all configs),
+The multi-seed variance is very low (PSNR std $< 0.04$ dB for all configs),
 confirming reproducibility.  Extension to video inpainting, where temporal
 boundary coherence is an additional concern, and to higher resolutions remain
 future work.  The combination of all loss terms (L4) requires further
@@ -598,15 +613,16 @@ quality ($-0.42$ dB PSNR vs.\ the baseline), whereas ASBC recovers this
 degradation, achieving $+0.38$ dB PSNR and $6.8\%$ lower B-MAE compared to
 the fixed spectral baseline.  Simple boundary losses (L1, L2) provide the best
 standalone B-MAE with no PSNR cost, while ASBC (L3c) achieves the best FID
-(56.86) among spectral configurations.  ConvNeXt-Tiny backbone
+(56.86) among spectral configurations and near-parity with baseline in three-seed statistics.
+ConvNeXt-Tiny backbone
 consistently outperforms ResNet-34 in the base configuration, confirming
 that architecture and loss design provide complementary improvements.
-Low multi-seed variance ($<0.03$ dB) confirms reproducibility.
-The consistent improvement of ASBC over fixed spectral baselines across both
-backbone architectures and domains confirms that adaptive frequency weighting
-at the boundary seam addresses a genuine deficiency in current inpainting
-loss design, and motivates further investigation of loss combination strategies
-and longer training schedules.
+Low multi-seed variance ($<0.04$ dB) confirms reproducibility.
+Overall, adaptive frequency weighting addresses a genuine deficiency in fixed
+spectral seam supervision, while the full loss-stack results indicate that
+loss-term interaction remains an open optimisation problem.
+These findings motivate future work on dynamic loss balancing and longer
+training schedules under larger-scale data budgets.
 
 % ─────────────────────────────────────────────────────────────────────────────
 \bibliographystyle{IEEEtran}
