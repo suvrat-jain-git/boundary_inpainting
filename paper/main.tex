@@ -5,7 +5,7 @@
 
 \usepackage{cite}
 \usepackage{amsmath,amssymb,amsfonts}
-\usepackage[draft]{graphicx}  % draft=placeholder boxes until real figures ready
+\usepackage{graphicx}
 \usepackage{textcomp}
 \usepackage{xcolor}
 \usepackage{booktabs}
@@ -28,17 +28,9 @@
 \title{Boundary-Aware Image Inpainting via Adaptive Spectral Boundary Coherence Loss}
 
 \author{
-  \IEEEauthorblockN{Hazem~[Surname]}
-  \IEEEauthorblockA{\textit{School of Computing and Information Systems}\\
-    \textit{[University Name]}\\
-    [City, Country]\\
-    hazem@[university].edu}
-  \and
-  \IEEEauthorblockN{[Co-Author Name]}
-  \IEEEauthorblockA{\textit{[Department]}\\
-    \textit{[University Name]}\\
-    [City, Country]\\
-    coauthor@[university].edu}
+  \IEEEauthorblockN{Anonymous Authors}
+  \IEEEauthorblockA{\textit{Anonymous Institution}\\
+    For Double-Blind Review}
 }
 
 \maketitle
@@ -55,9 +47,9 @@ discrete Fourier transform of localized boundary patches into $N$ radial
 frequency bands and learns per-band importance weights end-to-end through a
 compact set of parameters.  An entropy regularizer prevents weight collapse,
 ensuring that all frequency bands contribute meaningfully during training.
-We embed ASBC into a boundary-aware encoder--decoder architecture augmented
+We evaluate ASBC within a boundary-aware encoder--decoder implementation augmented
 with a Transformer bottleneck, mask-injected skip gates, and
-boundary-conditioning FiLM modules.  Comprehensive ablation over six
+boundary-conditioning FiLM modules.  Ablation over six
 loss configurations on Places365 shows that naive fixed-weight spectral
 supervision degrades overall quality ($-0.42$ dB PSNR vs.\ the reconstruction
 baseline), whereas our adaptive ASBC loss recovers this degradation:
@@ -79,12 +71,11 @@ deep learning, generative models
 \section{Introduction}
 \label{sec:intro}
 
-Image inpainting — the task of reconstructing plausible content inside an
-arbitrarily shaped missing region — has seen remarkable progress through
+Image inpainting — the task of reconstructing content inside an
+arbitrarily shaped missing region — has advanced through
 deep convolutional networks~\cite{liu2018partial, yu2019free} and, more
 recently, through Fourier-domain supervision~\cite{suvorov2022resolution} and
-Transformer architectures~\cite{li2022mat}.  Despite these advances, a
-persistent failure mode remains largely unaddressed: visible seam artefacts
+Transformer architectures~\cite{li2022mat}.  A recurring issue remains: visible seam artefacts
 at the \emph{boundary} between the inpainted hole and the surrounding known
 pixels.  These artefacts manifest as colour discontinuities, texture
 mis-matches, and high-frequency ringing that are immediately apparent to
@@ -109,12 +100,11 @@ We make three contributions:
   normalisation and an entropy regulariser ensure stable, non-degenerate
   weight distributions throughout training.
 
-  \item We design a \textbf{boundary-aware encoder--decoder} that tightly
-  integrates boundary signals at every scale via mask-injected skip gates and
-  boundary-conditioning FiLM modules, and incorporates a Transformer
-  bottleneck for long-range global context.
+  \item We evaluate ASBC in a \textbf{boundary-aware encoder--decoder}
+  scaffold (mask-injected skip gates, boundary-conditioning FiLM, optional Transformer
+  bottleneck, auxiliary heads) to isolate boundary-loss effects under controlled settings.
 
-  \item We provide an \textbf{extensive ablation study} across six loss
+  \item We provide an \textbf{targeted ablation study} across six loss
   configurations, two backbone architectures (ResNet-34 and ConvNeXt-Tiny),
   and three visual domains, demonstrating three practical findings:
   (i) fixed-weight spectral supervision degrades reconstruction quality,
@@ -234,6 +224,14 @@ penalise both intensity and gradient discontinuity at the seam:
     + \left|\nabla\hat{I}_{ij}-\nabla I_{ij}\right|.
   \label{eq:lbound}
 \end{equation}
+For the gradient-weighted variant used in L2/L4, we define
+$g_{ij}=\|\nabla I_{ij}\|$ and normalize it over each image,
+$\tilde{g}_{ij}=(g_{ij}-g_{\min})/(g_{\max}-g_{\min}+\epsilon)$, then use
+\begin{equation}
+  \Lbound^{\mathrm{gw}} = \frac{1}{|\mathcal{B}|}\sum_{(i,j)\in\mathcal{B}}
+    \tilde{g}_{ij}\,\left|\hat{I}_{ij}-I_{ij}\right|.
+  \label{eq:lbound_gw}
+\end{equation}
 
 \subsubsection{Adaptive Spectral Boundary Coherence Loss (ASBC)}
 \label{sec:asbc}
@@ -273,12 +271,41 @@ batched \texttt{torch.fft.fft2} call.  The ASBC loss is:
   \label{eq:ltotal}
 \end{equation}
 
+\textbf{Implementation Specifics.}
+Boundary map $B$ is computed as a symmetric seam band using morphological
+dilation of both hole and valid regions with radius $r{=}5$ pixels, then
+intersection (Section code: \texttt{data/dataset.py:get\_boundary\_band}).
+Masks are free-form stroke masks constrained to 10--60\% coverage
+(up to 15 strokes, with erosion/fill corrections to meet coverage range).
+For training spectral losses, we sample $K{=}8$ boundary-centered patches per
+image with patch size $p_s{=}16$ and require full-size patches at boundaries.
+ASBC uses four fixed radial bands (equal-radius bins) over FFT magnitude,
+with softmax-normalized learnable band weights and entropy regularization.
+Spectral losses are applied to composited predictions
+$\hat{I}_c = I\odot(1-M) + \hat{I}\odot M$.
+Gradient-weighted boundary loss uses Sobel magnitude on target images,
+normalized to $[0,1]$ per image before boundary masking.
+At test time, S-Coh is computed as normalized cross-correlation of boundary
+patch FFT magnitudes (patch size 32, 16 sampled patches/image), averaged
+across patches and images.
+
 \begin{figure}[t]
   \centering
-  \includegraphics[width=\linewidth]{figs/architecture.pdf}
-  \caption{Overview of the proposed boundary-aware inpainting architecture.
-    Dashed arrows indicate boundary map conditioning; the MISG and BCM modules
-    are highlighted in grey.}
+  \fbox{\begin{minipage}{0.96\linewidth}
+    \centering
+    \textbf{Input} $[\tilde{I};M]$
+    $\rightarrow$ \textbf{Encoder} (ResNet-34/ConvNeXt-T)
+    $\rightarrow$ \textbf{(Optional) Transformer Bottleneck} \\
+    \vspace{2mm}
+    \textbf{Decoder} with mask-injected skip gates (MISG) and
+    boundary-conditioning FiLM (BCM)
+    $\rightarrow$ \textbf{Output} $\hat{I}$ \\
+    \vspace{2mm}
+    \textbf{Auxiliary 1/8, 1/4 heads} used only in full configuration (L4)
+  \end{minipage}}
+  \caption{Architecture schematic used for ASBC evaluation. The model is
+    boundary-aware through MISG and BCM; Transformer bottleneck and auxiliary
+    heads are optional components used in selected configurations.}
   \label{fig:arch}
 \end{figure}
 
@@ -323,7 +350,16 @@ total compute: $\sim$29 hours including all ablation variants.
 Table~\ref{tab:ablation} presents the ablation over six loss configurations
 on Places365, all trained with identical hyperparameters and 12 epochs to
 ensure fair comparison.  Each configuration adds or modifies one component
-over the preceding row.
+relative to the base loss (not strictly sequential).
+
+Configuration definitions used in Table~\ref{tab:ablation} are:
+L0: base ($\Lhole{+}\Lvalid{+}\Lperc{+}\Ltv$);
+L1: L0 + uniform boundary loss;
+L2: L0 + gradient-weighted boundary loss;
+L3: L0 + fixed spectral boundary coherence;
+L3c: L0 + adaptive spectral boundary coherence (ASBC);
+L4: L0 + gradient boundary + fixed spectral + TV + multi-scale boundary heads
+(mixed loss+architecture setting).
 
 \begin{table*}[t]
   \centering
@@ -349,9 +385,9 @@ over the preceding row.
        & \textbf{20.42} & \textbf{0.7145} & 0.3524 & 0.0309 & \textbf{0.9836} & \textbf{54.85} \\
     L3 & L2 + fixed uniform spectral loss
        & 20.00 & 0.6999 & 0.3767 & 0.0353 & 0.9815 & 60.41 \\
-    L3c & L2 + ASBC (ours, learned weights)
+     L3c & L0 + ASBC (ours, learned spectral boundary)
        & 20.38 & 0.7095 & 0.3584 & 0.0329 & 0.9829 & 56.86 \\
-    L4 & L3c + boundary loss stack (ours)
+     L4 & mixed full stack (grad-boundary + fixed spectral + MS heads)
        & 20.06 & 0.7018 & 0.3739 & 0.0345 & 0.9819 & 60.04 \\
     \bottomrule
   \end{tabular}
@@ -367,24 +403,17 @@ bands are weighted equally.  \textbf{ASBC (L3c) reverses this degradation:}
 versus L3, it recovers $+0.38$ dB PSNR, reduces B-MAE by 6.8\% (0.0353$\to$0.0329), and
 improves FID by 3.54 points (60.41$\to$56.86), achieving the best FID among spectral configurations, demonstrating that
 learned per-band weights successfully adapt the spectral signal to scene content.
-The full loss stack L4 also improves substantially over L3 but sits between L3 and
-L0 in PSNR (20.06 dB), suggesting that further loss-weight tuning or additional training
-epochs could recover the remaining gap.
-
-Fig.~\ref{fig:asbc_weights} shows the ASBC band weights at convergence.  The
-learned weights are non-uniform and vary across seeds, indicating that the
-network identifies a specific frequency-domain trade-off at the boundary seam
-rather than converging to the uniform baseline.
-This non-degeneracy is enforced by the entropy regulariser (Section~\ref{sec:asbc}).
+The mixed full-stack setting L4 improves over L3 in PSNR and B-MAE, but remains below
+L0/L1/L2 and L3c, suggesting non-trivial interaction between loss terms and auxiliary
+architectural supervision under the current training budget.
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=0.92\linewidth]{figs/asbc_weights.pdf}
-  \caption{Converged ASBC band weights (mean $\pm$ std over 3 seeds).
-    Non-uniform learned weights confirm that different frequency bands
-    contribute differently to boundary coherence; the entropy regulariser
-    prevents collapse to a degenerate single-band solution.}
-  \label{fig:asbc_weights}
+  \includegraphics[width=0.95\linewidth]{figs/training_curves.png}
+  \caption{Training/validation dynamics across ablation configurations.
+    Curves show that fixed spectral supervision (L3) converges to a worse basin,
+    while ASBC (L3c) tracks a better boundary/reconstruction trade-off.}
+  \label{fig:training_dynamics}
 \end{figure}
 
 \subsection{Multi-Seed Reproducibility}
@@ -475,23 +504,19 @@ observed performance trade-offs.
   \end{tabular}
 \end{table}
 
-\subsection{Qualitative Results}
-Fig.~\ref{fig:qualitative} shows representative inpainting results for three
-scene categories (outdoor, indoor, texture) under large irregular masks.
-The baseline (L0) produces visible colour halos and blurred texture at the
-seam boundary, especially for complex textures.  Adding boundary supervision
-(L2) removes most colour discontinuities.  The full model (L4 with ASBC)
-eliminates the residual high-frequency ringing, producing seams that are
-visually imperceptible in all but the most challenging cases.
+\subsection{Quantitative Summary Visualization}
+Fig.~\ref{fig:ablation_vis} provides a compact visual summary of the ablation
+metrics, complementing Table~\ref{tab:ablation}. It highlights the same trend:
+L1/L2 are strongest for seam error under fixed training budget, L3 degrades,
+and L3c recovers much of that degradation.
 
-\begin{figure*}[t]
+\begin{figure}[t]
   \centering
-  \includegraphics[width=0.96\linewidth]{figs/qualitative.pdf}
-  \caption{Qualitative comparison. Columns: (a) masked input, (b) L0 baseline,
-    (c) L2 with boundary loss, (d) L4 full model (ours), (e) ground truth.
-    Bottom row highlights the boundary region with $4{\times}$ zoom.}
-  \label{fig:qualitative}
-\end{figure*}
+  \includegraphics[width=0.95\linewidth]{figs/ablation_table.png}
+  \caption{Visual summary of ablation metrics exported from the evaluation
+    pipeline.}
+  \label{fig:ablation_vis}
+\end{figure}
 
 \subsection{Sensitivity Analysis}
 Fig.~\ref{fig:sensitivity} shows the effect of varying three ASBC
@@ -509,19 +534,19 @@ Boundary dilation directly controls seam width: $d{=}3$ gives the best
 B-MAE (0.030) while $d{=}10$ degrades to 0.042, suggesting a narrow
 dilation that focuses supervision precisely at the pixel boundary yields
 better seam quality than a wide dilated band.
-All experiments in this paper use $k{=}16$, $p_s{=}16$, and $d{=}5$ as
+All experiments in this paper use $k{=}8$, $p_s{=}16$, and $d{=}5$ as
 a conservative default.
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=0.96\linewidth]{figs/sensitivity.pdf}
+  \includegraphics[width=0.96\linewidth]{figs/sensitivity_analysis.png}
   \caption{Sensitivity of B-MAE and S-Coh to (left) number of patches per image $k$,
     (centre) patch size $p_s$, and (right) boundary dilation radius $d$.
     B-MAE is stable across $k$; smaller patches improve S-Coh; smaller dilation improves B-MAE.}
   \label{fig:sensitivity}
 \end{figure}
 
-\subsection{Comparison with State of the Art}
+\subsection{Contextual Comparison with Published Methods}
 \label{sec:sota}
 
 Table~\ref{tab:sota} situates our method alongside published baselines on
@@ -542,17 +567,17 @@ and the introduced B-MAE metric for seam quality assessment.
     for scale reference only.}
   \label{tab:sota}
   \setlength{\tabcolsep}{4pt}
-  \begin{tabular}{lcccc}
+  \begin{tabular}{lccccc}
     \toprule
-    \textbf{Method} & \textbf{PSNR} & \textbf{SSIM} & \textbf{LPIPS} & \textbf{FID} \\
+    \textbf{Method} & \textbf{PSNR} & \textbf{SSIM} & \textbf{LPIPS} & \textbf{B-MAE} & \textbf{FID} \\
     \midrule
-    Partial Conv~\cite{liu2018partial}    & 26.93 & 0.854 & 0.187 & 44.7 \\
-    DeepFillv2~\cite{yu2019free}          & 27.81 & 0.876 & 0.162 & 37.1 \\
-    MISF~\cite{li2022misf}                & 28.64 & 0.888 & 0.148 & 31.8 \\
-    LaMa~\cite{suvorov2022resolution}     & 29.87 & 0.901 & 0.134 & 24.6 \\
+    Partial Conv~\cite{liu2018partial}    & 26.93 & 0.854 & 0.187 & -- & 44.7 \\
+    DeepFillv2~\cite{yu2019free}          & 27.81 & 0.876 & 0.162 & -- & 37.1 \\
+    MISF~\cite{li2022misf}                & 28.64 & 0.888 & 0.148 & -- & 31.8 \\
+    LaMa~\cite{suvorov2022resolution}     & 29.87 & 0.901 & 0.134 & -- & 24.6 \\
     \midrule
-    Ours L0 (ResNet-34, 12ep)$^\dagger$   & 20.42 & 0.714 & 0.354 & 54.9 \\
-    Ours L3c (ResNet-34, 12ep)$^\dagger$  & 20.38 & 0.710 & 0.358 & 56.9 \\
+    Ours L0 (ResNet-34, 12ep)$^\dagger$   & 20.42 & 0.714 & 0.354 & 0.0311 & 54.9 \\
+    Ours L3c (ResNet-34, 12ep)$^\dagger$  & 20.38 & 0.710 & 0.358 & 0.0329 & 56.9 \\
     \bottomrule
   \end{tabular}
   {\small $^\dagger$Not comparable to above: different training data scale and epochs.}
@@ -618,7 +643,7 @@ ConvNeXt-Tiny backbone
 consistently outperforms ResNet-34 in the base configuration, confirming
 that architecture and loss design provide complementary improvements.
 Low multi-seed variance ($<0.04$ dB) confirms reproducibility.
-Overall, adaptive frequency weighting addresses a genuine deficiency in fixed
+Overall, adaptive frequency weighting addresses a practical limitation of fixed
 spectral seam supervision, while the full loss-stack results indicate that
 loss-term interaction remains an open optimisation problem.
 These findings motivate future work on dynamic loss balancing and longer
